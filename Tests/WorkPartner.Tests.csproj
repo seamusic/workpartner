@@ -1,0 +1,35 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.8.0" />
+    <PackageReference Include="xunit" Version="2.6.6" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.5.6">
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
+    <PackageReference Include="Moq" Version="4.20.70" />
+    <PackageReference Include="FluentAssertions" Version="6.12.0" />
+    <PackageReference Include="EPPlus" Version="7.0.8" />
+    <PackageReference Include="NPOI" Version="2.7.1" />
+    <PackageReference Include="System.IO.Abstractions.TestingHelpers" Version="21.0.47" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../WorkPartner/WorkPartner.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Folder Include="TestData\" />
+    <Folder Include="UnitTests\" />
+    <Folder Include="IntegrationTests\" />
+  </ItemGroup>
+
+</Project>

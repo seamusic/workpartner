@@ -131,7 +131,7 @@
 - `WorkPartner/Utils/DataProcessor.cs` - 主要处理逻辑
 - `WorkPartner/Program.cs` - 集成和流程控制
 - `WorkPartner/Models/` - 数据模型定义
-- `WorkPartner/TODO.md` - 项目进度跟踪
+- `TODO.md` - 项目进度跟踪
 
 ### 关键方法
 - `DataProcessor.ProcessMissingData()` - 数据补充主入口
