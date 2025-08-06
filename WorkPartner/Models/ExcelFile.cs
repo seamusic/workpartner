@@ -41,6 +41,21 @@ namespace WorkPartner.Models
         public long FileSize { get; set; }
 
         /// <summary>
+        /// 最后修改时间
+        /// </summary>
+        public DateTime LastModified { get; set; }
+
+        /// <summary>
+        /// 文件是否被锁定
+        /// </summary>
+        public bool IsLocked { get; set; }
+
+        /// <summary>
+        /// 文件是否有效
+        /// </summary>
+        public bool IsValid { get; set; }
+
+        /// <summary>
         /// 是否已处理
         /// </summary>
         public bool IsProcessed { get; set; }

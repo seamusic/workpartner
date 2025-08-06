@@ -1,5 +1,7 @@
 ﻿using WorkPartner.Models;
 using WorkPartner.Utils;
+using WorkPartner.Services;
+using System.IO;
 
 namespace WorkPartner
 {
@@ -7,48 +9,352 @@ namespace WorkPartner
     {
         static void Main(string[] args)
         {
-            Console.WriteLine("WorkPartner Excel数据处理工具 - 阶段1测试");
+            Console.WriteLine("WorkPartner Excel数据处理工具 - 阶段2实现");
             Console.WriteLine("==========================================");
 
             // 初始化日志
-            Logger.Initialize("logs/test.log", LogLevel.Debug);
+            Logger.Initialize("logs/workpartner.log", LogLevel.Info);
 
             try
             {
-                // 测试文件名解析
-                TestFileNameParser();
+                // 解析命令行参数
+                var arguments = ParseCommandLineArguments(args);
+                if (arguments == null)
+                {
+                    ShowUsage();
+                    return;
+                }
 
-                // 测试数据模型
-                TestDataModels();
+                // 验证输入路径
+                if (!ValidateInputPath(arguments.InputPath))
+                {
+                    Console.WriteLine("❌ 输入路径无效或不存在");
+                    return;
+                }
 
-                // 测试数据处理工具
-                TestDataProcessor();
+                // 创建输出目录
+                CreateOutputDirectory(arguments.OutputPath);
 
-                // 测试日志功能
-                TestLogger();
+                // 扫描Excel文件
+                var excelFiles = ScanExcelFiles(arguments.InputPath);
+                if (excelFiles.Count == 0)
+                {
+                    Console.WriteLine("❌ 未找到任何Excel文件");
+                    return;
+                }
 
-                Console.WriteLine("\n✅ 阶段1基础功能测试完成！");
+                Console.WriteLine($"✅ 找到 {excelFiles.Count} 个Excel文件");
+
+                // 解析文件名并排序
+                var parsedFiles = ParseAndSortFiles(excelFiles);
+                if (parsedFiles.Count == 0)
+                {
+                    Console.WriteLine("❌ 没有找到符合格式的Excel文件");
+                    return;
+                }
+
+                Console.WriteLine($"✅ 成功解析 {parsedFiles.Count} 个文件");
+
+                // 读取Excel数据
+                var filesWithData = ReadExcelData(parsedFiles);
+                Console.WriteLine($"✅ 成功读取 {filesWithData.Count} 个文件的数据");
+
+                // 显示处理结果
+                DisplayProcessingResults(filesWithData);
+
+                Console.WriteLine("\n✅ 阶段2核心功能实现完成！");
             }
             catch (Exception ex)
             {
-                Logger.Error("测试过程中发生错误", ex);
-                Console.WriteLine($"\n❌ 测试失败: {ex.Message}");
+                Logger.Error("程序执行过程中发生错误", ex);
+                Console.WriteLine($"\n❌ 程序执行失败: {ex.Message}");
             }
 
             Console.WriteLine("\n按任意键退出...");
             Console.ReadKey();
         }
 
+        // 命令行参数模型
+        private class CommandLineArguments
+        {
+            public string InputPath { get; set; } = string.Empty;
+            public string OutputPath { get; set; } = string.Empty;
+            public bool Verbose { get; set; } = false;
+        }
+
+        // 解析命令行参数
+        private static CommandLineArguments? ParseCommandLineArguments(string[] args)
+        {
+            if (args.Length == 0)
+            {
+                return null;
+            }
+
+            var arguments = new CommandLineArguments();
+
+            for (int i = 0; i < args.Length; i++)
+            {
+                switch (args[i].ToLower())
+                {
+                    case "-i":
+                    case "--input":
+                        if (i + 1 < args.Length)
+                        {
+                            arguments.InputPath = args[++i];
+                        }
+                        break;
+                    case "-o":
+                    case "--output":
+                        if (i + 1 < args.Length)
+                        {
+                            arguments.OutputPath = args[++i];
+                        }
+                        break;
+                    case "-v":
+                    case "--verbose":
+                        arguments.Verbose = true;
+                        break;
+                    case "-h":
+                    case "--help":
+                        return null;
+                    default:
+                        // 如果没有指定参数，第一个参数作为输入路径
+                        if (string.IsNullOrEmpty(arguments.InputPath))
+                        {
+                            arguments.InputPath = args[i];
+                        }
+                        break;
+                }
+            }
+
+            // 如果没有指定输出路径，使用默认路径
+            if (string.IsNullOrEmpty(arguments.OutputPath))
+            {
+                arguments.OutputPath = Path.Combine(arguments.InputPath, "processed");
+            }
+
+            return arguments;
+        }
+
+        // 显示使用说明
+        private static void ShowUsage()
+        {
+            Console.WriteLine("使用方法:");
+            Console.WriteLine("  WorkPartner.exe <输入目录> [选项]");
+            Console.WriteLine("");
+            Console.WriteLine("参数:");
+            Console.WriteLine("  <输入目录>              包含Excel文件的目录路径");
+            Console.WriteLine("");
+            Console.WriteLine("选项:");
+            Console.WriteLine("  -o, --output <目录>     输出目录路径 (默认: <输入目录>/processed)");
+            Console.WriteLine("  -v, --verbose           详细输出模式");
+            Console.WriteLine("  -h, --help              显示此帮助信息");
+            Console.WriteLine("");
+            Console.WriteLine("支持的文件格式:");
+            Console.WriteLine("  ✅ .xlsx (Excel 2007+)");
+            Console.WriteLine("  ✅ .xls (Excel 97-2003)");
+            Console.WriteLine("");
+            Console.WriteLine("示例:");
+            Console.WriteLine("  WorkPartner.exe C:\\excel\\");
+            Console.WriteLine("  WorkPartner.exe ..\\excel\\");
+            Console.WriteLine("  WorkPartner.exe C:\\excel\\ -o C:\\output\\ -v");
+        }
+
+        // 验证输入路径
+        private static bool ValidateInputPath(string path)
+        {
+            if (string.IsNullOrEmpty(path))
+            {
+                Console.WriteLine("❌ 输入路径不能为空");
+                return false;
+            }
+
+            if (!Directory.Exists(path))
+            {
+                Console.WriteLine($"❌ 目录不存在: {path}");
+                return false;
+            }
+
+            Logger.Info($"验证输入路径: {path}");
+            return true;
+        }
+
+        // 创建输出目录
+        private static void CreateOutputDirectory(string outputPath)
+        {
+            try
+            {
+                if (!Directory.Exists(outputPath))
+                {
+                    Directory.CreateDirectory(outputPath);
+                    Logger.Info($"创建输出目录: {outputPath}");
+                }
+                else
+                {
+                    Logger.Info($"输出目录已存在: {outputPath}");
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.Error($"创建输出目录失败: {outputPath}", ex);
+                throw;
+            }
+        }
+
+        // 扫描Excel文件
+        private static List<string> ScanExcelFiles(string inputPath)
+        {
+            try
+            {
+                Logger.Info($"开始扫描目录: {inputPath}");
+                var fileService = new FileService();
+                var excelFiles = fileService.ScanExcelFiles(inputPath);
+                
+                foreach (var file in excelFiles)
+                {
+                    Logger.Debug($"找到Excel文件: {Path.GetFileName(file)}");
+                }
+
+                Logger.Info($"扫描完成，找到 {excelFiles.Count} 个Excel文件");
+                return excelFiles;
+            }
+            catch (Exception ex)
+            {
+                Logger.Error($"扫描Excel文件失败", ex);
+                throw;
+            }
+        }
+
+        // 解析文件名并排序
+        private static List<ExcelFile> ParseAndSortFiles(List<string> filePaths)
+        {
+            var parsedFiles = new List<ExcelFile>();
+
+            foreach (var filePath in filePaths)
+            {
+                var fileName = Path.GetFileName(filePath);
+                var parseResult = FileNameParser.ParseFileName(fileName);
+
+                if (parseResult?.IsValid == true)
+                {
+                    var excelFile = new ExcelFile
+                    {
+                        FilePath = filePath,
+                        FileName = fileName,
+                        Date = parseResult.Date,
+                        Hour = parseResult.Hour,
+                        ProjectName = parseResult.ProjectName,
+                        FileSize = new FileInfo(filePath).Length,
+                        LastModified = new FileInfo(filePath).LastWriteTime,
+                        IsValid = true
+                    };
+                    parsedFiles.Add(excelFile);
+                    Logger.Debug($"成功解析文件: {fileName}");
+                }
+                else
+                {
+                    Logger.Warning($"跳过无效格式文件: {fileName}");
+                }
+            }
+
+            // 按日期和时间排序
+            parsedFiles.Sort((a, b) =>
+            {
+                var dateComparison = a.Date.CompareTo(b.Date);
+                if (dateComparison != 0)
+                    return dateComparison;
+                return a.Hour.CompareTo(b.Hour);
+            });
+
+            Logger.Info($"成功解析 {parsedFiles.Count} 个文件，已按日期时间排序");
+            return parsedFiles;
+        }
+
+        // 读取Excel数据
+        private static List<ExcelFile> ReadExcelData(List<ExcelFile> files)
+        {
+            var filesWithData = new List<ExcelFile>();
+            var excelService = new ExcelService();
+
+            for (int i = 0; i < files.Count; i++)
+            {
+                var file = files[i];
+                Logger.Progress(i + 1, files.Count, $"读取Excel数据: {file.FileName}");
+
+                try
+                {
+                    var excelFileWithData = excelService.ReadExcelFile(file.FilePath);
+                    file.DataRows = excelFileWithData.DataRows;
+                    file.IsValid = excelFileWithData.IsValid;
+                    file.IsLocked = excelFileWithData.IsLocked;
+                    filesWithData.Add(file);
+
+                    Logger.Debug($"成功读取 {file.FileName}: {file.DataRows.Count} 行数据");
+                }
+                catch (Exception ex)
+                {
+                    Logger.Error($"读取文件失败: {file.FileName}", ex);
+                    // 继续处理其他文件
+                }
+            }
+
+            Logger.Info($"成功读取 {filesWithData.Count} 个文件的数据");
+            return filesWithData;
+        }
+
+        // 显示处理结果
+        private static void DisplayProcessingResults(List<ExcelFile> files)
+        {
+            Console.WriteLine("\n--- 处理结果摘要 ---");
+
+            // 按日期分组显示
+            var groupedFiles = files.GroupBy(f => f.Date).OrderBy(g => g.Key);
+
+            foreach (var group in groupedFiles)
+            {
+                Console.WriteLine($"\n日期: {group.Key:yyyy.M.d}");
+                var hours = group.Select(f => f.Hour).OrderBy(h => h).ToList();
+                Console.WriteLine($"  时间点: [{string.Join(", ", hours)}]");
+                Console.WriteLine($"  文件数: {group.Count()}");
+
+                foreach (var file in group.OrderBy(f => f.Hour))
+                {
+                    var dataCount = file.DataRows?.Count ?? 0;
+                    var completeness = file.DataRows?.Count > 0 
+                        ? file.DataRows.Average(r => r.CompletenessPercentage) 
+                        : 0;
+                    Console.WriteLine($"    {file.FormattedHour}时: {dataCount} 行数据, 完整性 {completeness:F1}%");
+                }
+            }
+
+            // 完整性检查
+            var completenessResult = DataProcessor.CheckCompleteness(files);
+            Console.WriteLine($"\n数据完整性: {(completenessResult.IsAllComplete ? "✅ 完整" : "❌ 不完整")}");
+
+            if (!completenessResult.IsAllComplete)
+            {
+                Console.WriteLine("缺失的时间点:");
+                foreach (var dateCompleteness in completenessResult.DateCompleteness)
+                {
+                    if (dateCompleteness.MissingHours.Any())
+                    {
+                        Console.WriteLine($"  {dateCompleteness.Date:yyyy.M.d}: [{string.Join(", ", dateCompleteness.MissingHours)}]");
+                    }
+                }
+            }
+        }
+
+        // 阶段1测试方法（保留用于测试）
         static void TestFileNameParser()
         {
             Console.WriteLine("\n--- 测试文件名解析 ---");
 
             var testFiles = new[]
             {
-                "2025.4.18-8云港城项目4#地块.xls",
-                "2025.4.19-16云港城项目4#地块.xls",
+                "2025.4.18-8云港城项目4#地块.xlsx",
+                "2025.4.19-16云港城项目4#地块.xlsx",
                 "invalid_file.txt",
-                "2025.4.20-25云港城项目4#地块.xls" // 无效时间
+                "2025.4.20-25云港城项目4#地块.xlsx" // 无效时间
             };
 
             foreach (var fileName in testFiles)
@@ -89,7 +395,7 @@ namespace WorkPartner
             // 测试ExcelFile
             var excelFile = new ExcelFile
             {
-                FileName = "test.xls",
+                FileName = "test.xlsx",
                 Date = DateTime.Now,
                 Hour = 8,
                 ProjectName = "测试项目",
@@ -113,18 +419,18 @@ namespace WorkPartner
             // 模拟2025.4.18的数据
             var file1 = new ExcelFile
             {
-                FileName = "2025.4.18-0云港城项目4#地块.xls",
+                FileName = "2025.4.18-0云港城项目4#地块.xlsx",
                 Date = new DateTime(2025, 4, 18),
                 Hour = 0,
-                ProjectName = "云港城项目4#地块.xls"
+                ProjectName = "云港城项目4#地块.xlsx"
             };
 
             var file2 = new ExcelFile
             {
-                FileName = "2025.4.18-16云港城项目4#地块.xls",
+                FileName = "2025.4.18-16云港城项目4#地块.xlsx",
                 Date = new DateTime(2025, 4, 18),
                 Hour = 16,
-                ProjectName = "云港城项目4#地块.xls"
+                ProjectName = "云港城项目4#地块.xlsx"
             };
 
             files.Add(file1);

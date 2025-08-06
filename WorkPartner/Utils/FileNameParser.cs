@@ -10,8 +10,8 @@ namespace WorkPartner.Utils
     {
         /// <summary>
         /// 文件名正则表达式
-        /// 格式：日期-时项目名称.xls
-        /// 示例：2025.4.20-16云港城项目4#地块.xls
+        /// 格式：日期-时项目名称.xlsx
+        /// 示例：2025.4.20-16云港城项目4#地块.xlsx
         /// </summary>
         private static readonly Regex FileNameRegex = new(
             @"^(\d{4}\.\d{1,2}\.\d{1,2})-(\d{1,2})(.+)$",
