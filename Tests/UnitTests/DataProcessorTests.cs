@@ -93,6 +93,71 @@ namespace WorkPartner.Tests.UnitTests
         }
 
         [Fact]
+        public void ProcessMissingData_LargeDataset_ShouldProcessEfficiently()
+        {
+            // Arrange - 创建大量测试数据
+            var files = new List<ExcelFile>();
+            var random = new Random(42); // 固定种子以确保可重复性
+            
+            // 创建100个文件，每个文件有10行数据，每行有50个值
+            for (int i = 0; i < 100; i++)
+            {
+                var file = new ExcelFile
+                {
+                    Date = new DateTime(2025, 4, 18).AddDays(i % 30),
+                    Hour = (i % 3) * 8, // 0, 8, 16
+                    ProjectName = "测试项目.xlsx",
+                    FileName = $"2025.4.{18 + (i % 30)}-{(i % 3) * 8:D2}测试项目.xlsx",
+                    FilePath = $@"C:\Test\2025.4.{18 + (i % 30)}-{(i % 3) * 8:D2}测试项目.xlsx"
+                };
+
+                var dataRows = new List<DataRow>();
+                for (int row = 0; row < 10; row++)
+                {
+                    var values = new List<double?>();
+                    for (int col = 0; col < 50; col++)
+                    {
+                        // 随机设置一些值为null（缺失数据）
+                        if (random.Next(100) < 20) // 20%的概率为null
+                        {
+                            values.Add(null);
+                        }
+                        else
+                        {
+                            values.Add(random.NextDouble() * 100);
+                        }
+                    }
+                    
+                    dataRows.Add(new DataRow
+                    {
+                        Name = $"数据行{row + 1}",
+                        Values = values
+                    });
+                }
+                
+                file.DataRows = dataRows;
+                files.Add(file);
+            }
+
+            // Act
+            var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+            var result = DataProcessor.ProcessMissingData(files);
+            stopwatch.Stop();
+
+            // Assert
+            result.Should().NotBeNull();
+            result.Should().HaveCount(100);
+            
+            // 验证处理时间在合理范围内（对于100个文件，应该在几秒内完成）
+            stopwatch.ElapsedMilliseconds.Should().BeLessThan(10000); // 10秒内
+            
+            // 验证所有缺失值都被补充了
+            var totalValues = result.SelectMany(f => f.DataRows).Sum(r => r.Values.Count);
+            var nullValues = result.SelectMany(f => f.DataRows).Sum(r => r.Values.Count(v => !v.HasValue));
+            nullValues.Should().Be(0); // 所有缺失值都应该被补充
+        }
+
+        [Fact]
         public void CheckCompleteness_EmptyList_ShouldReturnEmptyResult()
         {
             // Arrange

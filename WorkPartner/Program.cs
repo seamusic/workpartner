@@ -345,12 +345,24 @@ namespace WorkPartner
         // 读取Excel数据
         private static List<ExcelFile> ReadExcelData(List<ExcelFile> files)
         {
+            Console.WriteLine($"📖 开始读取Excel数据，共 {files.Count} 个文件...");
+            
             var filesWithData = new List<ExcelFile>();
             var excelService = new ExcelService();
+            var lastProgressTime = DateTime.Now;
 
             for (int i = 0; i < files.Count; i++)
             {
                 var file = files[i];
+                
+                // 每读取10个文件或每30秒显示一次进度
+                if ((i + 1) % 10 == 0 || (DateTime.Now - lastProgressTime).TotalSeconds >= 30)
+                {
+                    var progress = (double)(i + 1) / files.Count * 100;
+                    Console.WriteLine($"📈 读取进度: {i + 1}/{files.Count} ({progress:F1}%) - 当前文件: {file.FileName}");
+                    lastProgressTime = DateTime.Now;
+                }
+                
                 Logger.Progress(i + 1, files.Count, $"读取Excel数据: {file.FileName}");
 
                 try
@@ -366,10 +378,12 @@ namespace WorkPartner
                 catch (Exception ex)
                 {
                     Logger.Error($"读取文件失败: {file.FileName}", ex);
+                    Console.WriteLine($"❌ 读取失败: {file.FileName} - {ex.Message}");
                     // 继续处理其他文件
                 }
             }
 
+            Console.WriteLine($"✅ 成功读取 {filesWithData.Count} 个文件的数据");
             Logger.Info($"成功读取 {filesWithData.Count} 个文件的数据");
             return filesWithData;
         }
@@ -631,12 +645,17 @@ namespace WorkPartner
         /// <param name="outputPath">输出目录</param>
         private static async Task SaveProcessedFiles(List<ExcelFile> processedFiles, string outputPath)
         {
+            Console.WriteLine($"💾 开始保存处理后的文件，共 {processedFiles.Count} 个文件...");
+            
             var excelService = new ExcelService();
             int savedCount = 0;
             int totalFiles = processedFiles.Count;
+            var lastProgressTime = DateTime.Now;
 
-            foreach (var file in processedFiles)
+            for (int i = 0; i < processedFiles.Count; i++)
             {
+                var file = processedFiles[i];
+                
                 try
                 {
                     // 使用标准化的文件名格式（确保时间点使用零填充）
@@ -647,7 +666,18 @@ namespace WorkPartner
                     if (success)
                     {
                         savedCount++;
-                        Console.WriteLine($"✅ 已保存: {standardizedFileName}");
+                        
+                        // 每保存10个文件或每30秒显示一次进度
+                        if (savedCount % 10 == 0 || (DateTime.Now - lastProgressTime).TotalSeconds >= 30)
+                        {
+                            var progress = (double)savedCount / totalFiles * 100;
+                            Console.WriteLine($"📈 保存进度: {savedCount}/{totalFiles} ({progress:F1}%) - 当前文件: {standardizedFileName}");
+                            lastProgressTime = DateTime.Now;
+                        }
+                        else
+                        {
+                            Console.WriteLine($"✅ 已保存: {standardizedFileName}");
+                        }
                     }
                     else
                     {

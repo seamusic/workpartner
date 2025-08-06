@@ -10,7 +10,7 @@ namespace WorkPartner.Utils
         /// <summary>
         /// 处理缺失数据
         /// </summary>
-        /// <param name="files">Excel文件列表</param>
+        /// <param name="files">文件列表</param>
         /// <returns>处理后的文件列表</returns>
         public static List<ExcelFile> ProcessMissingData(List<ExcelFile> files)
         {
@@ -19,26 +19,77 @@ namespace WorkPartner.Utils
                 return new List<ExcelFile>();
             }
 
+            Console.WriteLine($"🔄 开始处理缺失数据，共 {files.Count} 个文件...");
+            
             // 按时间顺序排序
             var sortedFiles = files.OrderBy(f => f.Date).ThenBy(f => f.Hour).ToList();
 
+            // 创建缓存以提高性能
+            var valueCache = new Dictionary<string, Dictionary<int, List<double>>>();
+            
+            // 预处理：为每个数据名称和值索引创建有效值缓存
+            Console.WriteLine("📊 预处理数据缓存...");
+            PreprocessValueCache(sortedFiles, valueCache);
+
             // 处理每个文件中的缺失数据
+            var totalFiles = sortedFiles.Count;
+            var processedCount = 0;
+            var lastProgressTime = DateTime.Now;
+            
             for (int i = 0; i < sortedFiles.Count; i++)
             {
                 var currentFile = sortedFiles[i];
-                ProcessFileMissingData(currentFile, sortedFiles, i);
+                ProcessFileMissingDataOptimized(currentFile, sortedFiles, i, valueCache);
+                
+                processedCount++;
+                
+                // 每处理10个文件或每30秒显示一次进度
+                if (processedCount % 10 == 0 || (DateTime.Now - lastProgressTime).TotalSeconds >= 30)
+                {
+                    var progress = (double)processedCount / totalFiles * 100;
+                    Console.WriteLine($"📈 处理进度: {processedCount}/{totalFiles} ({progress:F1}%) - 当前文件: {currentFile.FileName}");
+                    lastProgressTime = DateTime.Now;
+                }
             }
 
+            Console.WriteLine($"✅ 缺失数据处理完成，共处理 {totalFiles} 个文件");
             return sortedFiles;
         }
 
         /// <summary>
-        /// 处理单个文件的缺失数据
+        /// 预处理值缓存以提高性能
         /// </summary>
-        /// <param name="currentFile">当前文件</param>
-        /// <param name="allFiles">所有文件列表</param>
-        /// <param name="currentIndex">当前文件索引</param>
-        private static void ProcessFileMissingData(ExcelFile currentFile, List<ExcelFile> allFiles, int currentIndex)
+        private static void PreprocessValueCache(List<ExcelFile> files, Dictionary<string, Dictionary<int, List<double>>> valueCache)
+        {
+            foreach (var file in files)
+            {
+                foreach (var dataRow in file.DataRows)
+                {
+                    if (!valueCache.ContainsKey(dataRow.Name))
+                    {
+                        valueCache[dataRow.Name] = new Dictionary<int, List<double>>();
+                    }
+                    
+                    for (int valueIndex = 0; valueIndex < dataRow.Values.Count; valueIndex++)
+                    {
+                        if (!valueCache[dataRow.Name].ContainsKey(valueIndex))
+                        {
+                            valueCache[dataRow.Name][valueIndex] = new List<double>();
+                        }
+                        
+                        if (dataRow.Values[valueIndex].HasValue)
+                        {
+                            valueCache[dataRow.Name][valueIndex].Add(dataRow.Values[valueIndex].Value);
+                        }
+                    }
+                }
+            }
+        }
+
+        /// <summary>
+        /// 优化后的单个文件缺失数据处理
+        /// </summary>
+        private static void ProcessFileMissingDataOptimized(ExcelFile currentFile, List<ExcelFile> allFiles, int currentIndex, Dictionary<string, Dictionary<int, List<double>>> valueCache)
         {
             foreach (var dataRow in currentFile.DataRows)
             {
@@ -46,8 +97,8 @@ namespace WorkPartner.Utils
                 {
                     if (!dataRow.Values[valueIndex].HasValue)
                     {
-                        // 计算补充值
-                        var supplementValue = CalculateSupplementValue(dataRow.Name, valueIndex, allFiles, currentIndex);
+                        // 使用缓存的优化计算补充值
+                        var supplementValue = CalculateSupplementValueOptimized(dataRow.Name, valueIndex, allFiles, currentIndex, valueCache);
                         if (supplementValue.HasValue)
                         {
                             dataRow.Values[valueIndex] = supplementValue.Value;
@@ -58,47 +109,43 @@ namespace WorkPartner.Utils
         }
 
         /// <summary>
-        /// 计算补充值
+        /// 优化后的补充值计算
         /// </summary>
-        /// <param name="dataName">数据名称</param>
-        /// <param name="valueIndex">值索引</param>
-        /// <param name="allFiles">所有文件列表</param>
-        /// <param name="currentIndex">当前文件索引</param>
-        /// <returns>补充值</returns>
-        private static double? CalculateSupplementValue(string dataName, int valueIndex, List<ExcelFile> allFiles, int currentIndex)
+        private static double? CalculateSupplementValueOptimized(string dataName, int valueIndex, List<ExcelFile> allFiles, int currentIndex, Dictionary<string, Dictionary<int, List<double>>> valueCache)
         {
-            // 优先级策略：
-            // 1. 前后相邻文件的平均值
-            // 2. 同一天其他时间点的数据
-            // 3. 最近有效数据的值
-
             var currentFile = allFiles[currentIndex];
             
-            // 策略1：查找前后相邻文件
-            var beforeValue = GetNearestValidValue(dataName, valueIndex, allFiles, currentIndex, searchBackward: true);
-            var afterValue = GetNearestValidValue(dataName, valueIndex, allFiles, currentIndex, searchBackward: false);
+            // 策略1：前后相邻文件的平均值
+            var beforeValue = GetNearestValidValueOptimized(dataName, valueIndex, allFiles, currentIndex, searchBackward: true);
+            var afterValue = GetNearestValidValueOptimized(dataName, valueIndex, allFiles, currentIndex, searchBackward: false);
             
             if (beforeValue.HasValue && afterValue.HasValue)
             {
                 return (beforeValue.Value + afterValue.Value) / 2.0;
             }
             
-            // 策略2：同一天其他时间点
-            var sameDayFiles = allFiles.Where(f => f.Date.Date == currentFile.Date.Date && f != currentFile).ToList();
-            var sameDayValues = new List<double>();
-            
-            foreach (var file in sameDayFiles)
+            // 策略2：同一天其他时间点（使用缓存）
+            if (valueCache.ContainsKey(dataName) && valueCache[dataName].ContainsKey(valueIndex))
             {
-                var dataRow = file.DataRows.FirstOrDefault(r => r.Name == dataName);
-                if (dataRow != null && valueIndex < dataRow.Values.Count && dataRow.Values[valueIndex].HasValue)
+                var sameDayValues = new List<double>();
+                var currentDate = currentFile.Date.Date;
+                
+                foreach (var file in allFiles)
                 {
-                    sameDayValues.Add(dataRow.Values[valueIndex].Value);
+                    if (file.Date.Date == currentDate && file != currentFile)
+                    {
+                        var dataRow = file.DataRows.FirstOrDefault(r => r.Name == dataName);
+                        if (dataRow != null && valueIndex < dataRow.Values.Count && dataRow.Values[valueIndex].HasValue)
+                        {
+                            sameDayValues.Add(dataRow.Values[valueIndex].Value);
+                        }
+                    }
                 }
-            }
-            
-            if (sameDayValues.Any())
-            {
-                return sameDayValues.Average();
+                
+                if (sameDayValues.Any())
+                {
+                    return sameDayValues.Average();
+                }
             }
             
             // 策略3：使用单个最近有效值
@@ -112,32 +159,19 @@ namespace WorkPartner.Utils
                 return afterValue.Value;
             }
             
-            // 策略4：作为最后手段，使用所有有效数据的平均值
-            var allValidValues = new List<double>();
-            foreach (var file in allFiles)
+            // 策略4：使用全局平均值（从缓存中获取）
+            if (valueCache.ContainsKey(dataName) && valueCache[dataName].ContainsKey(valueIndex) && valueCache[dataName][valueIndex].Any())
             {
-                if (file == currentFile) continue;
-                
-                var dataRow = file.DataRows.FirstOrDefault(r => r.Name == dataName);
-                if (dataRow != null && valueIndex < dataRow.Values.Count && dataRow.Values[valueIndex].HasValue)
-                {
-                    allValidValues.Add(dataRow.Values[valueIndex].Value);
-                }
+                return valueCache[dataName][valueIndex].Average();
             }
             
-            return allValidValues.Any() ? allValidValues.Average() : null;
+            return null;
         }
 
         /// <summary>
-        /// 获取最近的有效值
+        /// 优化后的最近有效值获取
         /// </summary>
-        /// <param name="dataName">数据名称</param>
-        /// <param name="valueIndex">值索引</param>
-        /// <param name="allFiles">所有文件列表</param>
-        /// <param name="currentIndex">当前文件索引</param>
-        /// <param name="searchBackward">是否向前搜索</param>
-        /// <returns>最近的有效值</returns>
-        private static double? GetNearestValidValue(string dataName, int valueIndex, List<ExcelFile> allFiles, int currentIndex, bool searchBackward)
+        private static double? GetNearestValidValueOptimized(string dataName, int valueIndex, List<ExcelFile> allFiles, int currentIndex, bool searchBackward)
         {
             var step = searchBackward ? -1 : 1;
             var startIndex = currentIndex + step;
