@@ -163,29 +163,131 @@ namespace WorkPartner.Services
         {
             try
             {
-                using var package = new ExcelPackage();
-                var worksheet = package.Workbook.Worksheets.Add("Sheet1");
-
-                // 写入数据名称到B列
-                for (int i = 0; i < excelFile.DataRows.Count; i++)
+                var extension = Path.GetExtension(excelFile.FilePath).ToLower();
+                
+                if (extension == ".xls")
                 {
-                    var row = excelFile.DataRows[i];
-                    worksheet.Cells[i + 5, 2].Value = row.Name; // B列，从第5行开始
-
-                    // 写入数据值到D-I列
-                    for (int j = 0; j < row.Values.Count && j < 6; j++)
-                    {
-                        var value = row.Values[j];
-                        worksheet.Cells[i + 5, j + 4].Value = value; // D-I列
-                    }
+                    return SaveAsXlsFile(excelFile, outputPath);
                 }
-
-                package.SaveAs(new FileInfo(outputPath));
-                return true;
+                else if (extension == ".xlsx")
+                {
+                    return SaveAsXlsxFile(excelFile, outputPath);
+                }
+                else
+                {
+                    throw new InvalidOperationException($"不支持的文件格式: {extension}");
+                }
             }
             catch (Exception ex)
             {
                 throw new InvalidOperationException($"保存Excel文件失败: {Path.GetFileName(outputPath)}", ex);
+            }
+        }
+
+        private bool SaveAsXlsFile(ExcelFile excelFile, string outputPath)
+        {
+            try
+            {
+                // 复制原文件保持格式
+                File.Copy(excelFile.FilePath, outputPath, true);
+                
+                // 打开复制的文件，更新数据
+                HSSFWorkbook workbook;
+                using (var fileStream = new FileStream(outputPath, FileMode.Open, FileAccess.Read))
+                {
+                    workbook = new HSSFWorkbook(fileStream);
+                }
+                
+                var sheet = workbook.GetSheetAt(0);
+
+                // 更新数据行
+                foreach (var dataRow in excelFile.DataRows)
+                {
+                    var rowIndex = dataRow.RowIndex - 1; // 转换为0基索引
+                    var row = sheet.GetRow(rowIndex) ?? sheet.CreateRow(rowIndex);
+
+                    // 更新B列的名称
+                    var nameCell = row.GetCell(1) ?? row.CreateCell(1);
+                    nameCell.SetCellValue(dataRow.Name);
+
+                    // 更新D-I列的数据值
+                    for (int j = 0; j < dataRow.Values.Count && j < 6; j++)
+                    {
+                        var valueCell = row.GetCell(j + 3) ?? row.CreateCell(j + 3);
+                        var value = dataRow.Values[j];
+                        
+                        if (value.HasValue)
+                        {
+                            valueCell.SetCellValue(value.Value);
+                        }
+                        else
+                        {
+                            valueCell.SetCellType(CellType.Blank);
+                        }
+                    }
+                }
+
+                // 保存回文件
+                using (var outputStream = new FileStream(outputPath, FileMode.Create, FileAccess.Write))
+                {
+                    workbook.Write(outputStream);
+                }
+                
+                workbook.Close();
+                return true;
+            }
+            catch (Exception ex)
+            {
+                throw new InvalidOperationException($"保存XLS文件失败: {Path.GetFileName(outputPath)}", ex);
+            }
+        }
+
+        private bool SaveAsXlsxFile(ExcelFile excelFile, string outputPath)
+        {
+            try
+            {
+                // 复制原文件保持格式
+                File.Copy(excelFile.FilePath, outputPath, true);
+                
+                // 打开复制的文件，更新数据
+                using var package = new ExcelPackage(new FileInfo(outputPath));
+                var worksheet = package.Workbook.Worksheets.FirstOrDefault();
+                
+                if (worksheet == null)
+                {
+                    throw new InvalidOperationException("Excel文件中没有找到工作表");
+                }
+
+                // 更新数据行
+                foreach (var dataRow in excelFile.DataRows)
+                {
+                    var rowIndex = dataRow.RowIndex; // EPPlus使用1基索引
+
+                    // 更新B列的名称
+                    worksheet.Cells[rowIndex, 2].Value = dataRow.Name;
+
+                    // 更新D-I列的数据值
+                    for (int j = 0; j < dataRow.Values.Count && j < 6; j++)
+                    {
+                        var value = dataRow.Values[j];
+                        
+                        if (value.HasValue)
+                        {
+                            worksheet.Cells[rowIndex, j + 4].Value = value.Value;
+                        }
+                        else
+                        {
+                            worksheet.Cells[rowIndex, j + 4].Value = null;
+                        }
+                    }
+                }
+
+                package.Save();
+                return true;
+            }
+            catch (Exception ex)
+            {
+                throw new InvalidOperationException($"保存XLSX文件失败: {Path.GetFileName(outputPath)}", ex);
             }
         }
 

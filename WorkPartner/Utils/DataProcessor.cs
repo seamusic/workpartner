@@ -67,24 +67,94 @@ namespace WorkPartner.Utils
         /// <returns>补充值</returns>
         private static double? CalculateSupplementValue(string dataName, int valueIndex, List<ExcelFile> allFiles, int currentIndex)
         {
-            var validValues = new List<double>();
+            // 优先级策略：
+            // 1. 前后相邻文件的平均值
+            // 2. 同一天其他时间点的数据
+            // 3. 最近有效数据的值
 
-            // 查找前后文件中相同名称的有效数据
-            for (int i = 0; i < allFiles.Count; i++)
+            var currentFile = allFiles[currentIndex];
+            
+            // 策略1：查找前后相邻文件
+            var beforeValue = GetNearestValidValue(dataName, valueIndex, allFiles, currentIndex, searchBackward: true);
+            var afterValue = GetNearestValidValue(dataName, valueIndex, allFiles, currentIndex, searchBackward: false);
+            
+            if (beforeValue.HasValue && afterValue.HasValue)
             {
-                if (i == currentIndex) continue; // 跳过当前文件
+                return (beforeValue.Value + afterValue.Value) / 2.0;
+            }
+            
+            // 策略2：同一天其他时间点
+            var sameDayFiles = allFiles.Where(f => f.Date.Date == currentFile.Date.Date && f != currentFile).ToList();
+            var sameDayValues = new List<double>();
+            
+            foreach (var file in sameDayFiles)
+            {
+                var dataRow = file.DataRows.FirstOrDefault(r => r.Name == dataName);
+                if (dataRow != null && valueIndex < dataRow.Values.Count && dataRow.Values[valueIndex].HasValue)
+                {
+                    sameDayValues.Add(dataRow.Values[valueIndex].Value);
+                }
+            }
+            
+            if (sameDayValues.Any())
+            {
+                return sameDayValues.Average();
+            }
+            
+            // 策略3：使用单个最近有效值
+            if (beforeValue.HasValue)
+            {
+                return beforeValue.Value;
+            }
+            
+            if (afterValue.HasValue)
+            {
+                return afterValue.Value;
+            }
+            
+            // 策略4：作为最后手段，使用所有有效数据的平均值
+            var allValidValues = new List<double>();
+            foreach (var file in allFiles)
+            {
+                if (file == currentFile) continue;
+                
+                var dataRow = file.DataRows.FirstOrDefault(r => r.Name == dataName);
+                if (dataRow != null && valueIndex < dataRow.Values.Count && dataRow.Values[valueIndex].HasValue)
+                {
+                    allValidValues.Add(dataRow.Values[valueIndex].Value);
+                }
+            }
+            
+            return allValidValues.Any() ? allValidValues.Average() : null;
+        }
 
+        /// <summary>
+        /// 获取最近的有效值
+        /// </summary>
+        /// <param name="dataName">数据名称</param>
+        /// <param name="valueIndex">值索引</param>
+        /// <param name="allFiles">所有文件列表</param>
+        /// <param name="currentIndex">当前文件索引</param>
+        /// <param name="searchBackward">是否向前搜索</param>
+        /// <returns>最近的有效值</returns>
+        private static double? GetNearestValidValue(string dataName, int valueIndex, List<ExcelFile> allFiles, int currentIndex, bool searchBackward)
+        {
+            var step = searchBackward ? -1 : 1;
+            var startIndex = currentIndex + step;
+            var endIndex = searchBackward ? 0 : allFiles.Count - 1;
+            
+            for (int i = startIndex; searchBackward ? i >= endIndex : i <= endIndex; i += step)
+            {
                 var file = allFiles[i];
                 var dataRow = file.DataRows.FirstOrDefault(r => r.Name == dataName);
                 
                 if (dataRow != null && valueIndex < dataRow.Values.Count && dataRow.Values[valueIndex].HasValue)
                 {
-                    validValues.Add(dataRow.Values[valueIndex].Value);
+                    return dataRow.Values[valueIndex].Value;
                 }
             }
-
-            // 计算平均值
-            return validValues.Any() ? validValues.Average() : null;
+            
+            return null;
         }
 
         /// <summary>
@@ -151,12 +221,18 @@ namespace WorkPartner.Utils
                 if (dateCompleteness.IsComplete) continue;
 
                 var dateFiles = files.Where(f => f.Date.Date == dateCompleteness.Date).ToList();
-                var sourceFile = dateFiles.FirstOrDefault(); // 使用当天第一个文件作为源文件
-
-                if (sourceFile is null) continue;
 
                 foreach (var missingHour in dateCompleteness.MissingHours)
                 {
+                    // 选择最合适的源文件策略：
+                    // 1. 同一天相同时间点的文件（如果有的话）
+                    // 2. 同一天的其他时间点文件
+                    // 3. 最近日期的相同时间点文件
+                    // 4. 最近日期的任意文件
+                    var sourceFile = SelectBestSourceFile(files, dateCompleteness.Date, missingHour, dateFiles);
+
+                    if (sourceFile is null) continue;
+
                     var supplementFile = new SupplementFileInfo
                     {
                         TargetDate = dateCompleteness.Date,
@@ -171,6 +247,115 @@ namespace WorkPartner.Utils
             }
 
             return supplementFiles;
+        }
+
+        /// <summary>
+        /// 选择最合适的源文件
+        /// </summary>
+        /// <param name="allFiles">所有文件列表</param>
+        /// <param name="targetDate">目标日期</param>
+        /// <param name="targetHour">目标时间</param>
+        /// <param name="sameDayFiles">同一天的文件列表</param>
+        /// <returns>最合适的源文件</returns>
+        private static ExcelFile? SelectBestSourceFile(List<ExcelFile> allFiles, DateTime targetDate, int targetHour, List<ExcelFile> sameDayFiles)
+        {
+            // 策略1：同一天的其他时间点文件（优先选择）
+            if (sameDayFiles.Any())
+            {
+                // 优先选择与目标时间最接近的时间点
+                var bestSameDayFile = sameDayFiles
+                    .OrderBy(f => Math.Abs(f.Hour - targetHour))
+                    .FirstOrDefault();
+                    
+                if (bestSameDayFile != null)
+                {
+                    return bestSameDayFile;
+                }
+            }
+
+            // 策略2：最近日期的相同时间点文件
+            var sameHourFiles = allFiles.Where(f => f.Hour == targetHour).ToList();
+            if (sameHourFiles.Any())
+            {
+                // 选择时间上最接近的日期
+                var bestSameHourFile = sameHourFiles
+                    .OrderBy(f => Math.Abs((f.Date.Date - targetDate).TotalDays))
+                    .FirstOrDefault();
+                    
+                if (bestSameHourFile != null)
+                {
+                    return bestSameHourFile;
+                }
+            }
+
+            // 策略3：最近日期的任意文件
+            var nearestFile = allFiles
+                .OrderBy(f => Math.Abs((f.Date.Date - targetDate).TotalDays))
+                .ThenBy(f => Math.Abs(f.Hour - targetHour))
+                .FirstOrDefault();
+
+            return nearestFile;
+        }
+
+        /// <summary>
+        /// 创建补充文件
+        /// </summary>
+        /// <param name="supplementFiles">补充文件信息列表</param>
+        /// <param name="outputDirectory">输出目录</param>
+        /// <returns>创建成功的文件数量</returns>
+        public static int CreateSupplementFiles(List<SupplementFileInfo> supplementFiles, string outputDirectory)
+        {
+            if (supplementFiles == null || !supplementFiles.Any())
+            {
+                return 0;
+            }
+
+            if (!Directory.Exists(outputDirectory))
+            {
+                Directory.CreateDirectory(outputDirectory);
+            }
+
+            int createdCount = 0;
+
+            foreach (var supplementFile in supplementFiles)
+            {
+                try
+                {
+                    // 优先从输出目录中查找已处理的源文件
+                    var processedSourcePath = Path.Combine(outputDirectory, supplementFile.SourceFile.FileName);
+                    string sourceFilePath;
+                    
+                    if (File.Exists(processedSourcePath))
+                    {
+                        // 使用已处理的文件作为源文件
+                        sourceFilePath = processedSourcePath;
+                        Console.WriteLine($"✅ 使用已处理的源文件: {supplementFile.SourceFile.FileName}");
+                    }
+                    else
+                    {
+                        // 回退到原始文件
+                        sourceFilePath = supplementFile.SourceFile.FilePath;
+                        Console.WriteLine($"⚠️  使用原始源文件: {Path.GetFileName(sourceFilePath)}");
+                    }
+                    
+                    var targetFilePath = Path.Combine(outputDirectory, supplementFile.TargetFileName);
+
+                    // 复制源文件到目标位置
+                    File.Copy(sourceFilePath, targetFilePath, true);
+                    
+                    createdCount++;
+                    
+                    Console.WriteLine($"✅ 已创建补充文件: {supplementFile.TargetFileName}");
+                    Console.WriteLine($"   源文件: {Path.GetFileName(sourceFilePath)}");
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"❌ 创建补充文件失败: {supplementFile.TargetFileName}");
+                    Console.WriteLine($"   错误: {ex.Message}");
+                }
+            }
+
+            return createdCount;
         }
 
         /// <summary>

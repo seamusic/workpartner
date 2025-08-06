@@ -7,9 +7,9 @@ namespace WorkPartner
 {
     internal class Program
     {
-        static void Main(string[] args)
+        static async Task Main(string[] args)
         {
-            Console.WriteLine("WorkPartner Excel数据处理工具 - 阶段2实现");
+            Console.WriteLine("WorkPartner Excel数据处理工具 - 阶段3实现");
             Console.WriteLine("==========================================");
 
             // 初始化日志
@@ -59,10 +59,43 @@ namespace WorkPartner
                 var filesWithData = ReadExcelData(parsedFiles);
                 Console.WriteLine($"✅ 成功读取 {filesWithData.Count} 个文件的数据");
 
-                // 显示处理结果
-                DisplayProcessingResults(filesWithData);
+                // 阶段3：数据处理逻辑
+                Console.WriteLine("\n🔄 开始阶段3数据处理...");
+                
+                // 3.1 数据补充算法
+                Console.WriteLine("📊 处理缺失数据...");
+                var processedFiles = DataProcessor.ProcessMissingData(filesWithData);
+                
+                // 保存处理后的数据到Excel文件
+                Console.WriteLine("💾 保存处理后的数据...");
+                await SaveProcessedFiles(processedFiles, arguments.OutputPath);
+                
+                // 3.2 数据完整性检查
+                Console.WriteLine("🔍 检查数据完整性...");
+                var completenessResult = DataProcessor.CheckCompleteness(processedFiles);
+                
+                // 生成补充文件列表
+                var supplementFiles = DataProcessor.GenerateSupplementFiles(processedFiles);
+                
+                // 创建补充文件
+                if (supplementFiles.Any())
+                {
+                    Console.WriteLine($"📁 创建 {supplementFiles.Count} 个补充文件...");
+                    var createdCount = DataProcessor.CreateSupplementFiles(supplementFiles, arguments.OutputPath);
+                    Console.WriteLine($"✅ 成功创建 {createdCount} 个补充文件");
+                }
+                else
+                {
+                    Console.WriteLine("ℹ️ 无需创建补充文件，所有时间点数据都完整");
+                }
+                
+                // 数据质量验证
+                var qualityReport = DataProcessor.ValidateDataQuality(processedFiles);
 
-                Console.WriteLine("\n✅ 阶段2核心功能实现完成！");
+                // 显示处理结果
+                DisplayProcessingResults(processedFiles, completenessResult, supplementFiles, qualityReport);
+
+                Console.WriteLine("\n✅ 阶段3数据处理逻辑完成！");
             }
             catch (Exception ex)
             {
@@ -302,7 +335,78 @@ namespace WorkPartner
             return filesWithData;
         }
 
-        // 显示处理结果
+        // 显示处理结果（阶段3版本）
+        private static void DisplayProcessingResults(List<ExcelFile> files, CompletenessCheckResult completenessResult, List<SupplementFileInfo> supplementFiles, DataQualityReport qualityReport)
+        {
+            Console.WriteLine("\n--- 阶段3处理结果摘要 ---");
+
+            // 按日期分组显示
+            var groupedFiles = files.GroupBy(f => f.Date).OrderBy(g => g.Key);
+
+            foreach (var group in groupedFiles)
+            {
+                Console.WriteLine($"\n日期: {group.Key:yyyy.M.d}");
+                var hours = group.Select(f => f.Hour).OrderBy(h => h).ToList();
+                Console.WriteLine($"  时间点: [{string.Join(", ", hours)}]");
+                Console.WriteLine($"  文件数: {group.Count()}");
+
+                foreach (var file in group.OrderBy(f => f.Hour))
+                {
+                    var dataCount = file.DataRows?.Count ?? 0;
+                    var completeness = file.DataRows?.Count > 0 
+                        ? file.DataRows.Average(r => r.CompletenessPercentage) 
+                        : 0;
+                    Console.WriteLine($"    {file.FormattedHour}时: {dataCount} 行数据, 完整性 {completeness:F1}%");
+                }
+            }
+
+            // 数据补充统计
+            Console.WriteLine($"\n📊 数据补充统计:");
+            var totalMissingValues = files.SelectMany(f => f.DataRows).Sum(r => r.MissingDataCount);
+            var totalValues = files.SelectMany(f => f.DataRows).Sum(r => r.Values.Count);
+            var supplementedCount = totalValues - totalMissingValues; // 假设所有缺失都已补充
+            Console.WriteLine($"  总数据点: {totalValues}");
+            Console.WriteLine($"  原始缺失: {totalMissingValues}");
+            Console.WriteLine($"  已补充: {supplementedCount}");
+            Console.WriteLine($"  补充率: {(totalMissingValues > 0 ? 100.0 : 0):F1}%");
+
+            // 完整性检查结果
+            Console.WriteLine($"\n🔍 数据完整性: {(completenessResult.IsAllComplete ? "✅ 完整" : "❌ 不完整")}");
+
+            if (!completenessResult.IsAllComplete)
+            {
+                Console.WriteLine("缺失的时间点:");
+                foreach (var dateCompleteness in completenessResult.DateCompleteness)
+                {
+                    if (dateCompleteness.MissingHours.Any())
+                    {
+                        Console.WriteLine($"  {dateCompleteness.Date:yyyy.M.d}: [{string.Join(", ", dateCompleteness.MissingHours)}]");
+                    }
+                }
+            }
+
+            // 补充文件建议
+            if (supplementFiles.Any())
+            {
+                Console.WriteLine($"\n📋 建议生成 {supplementFiles.Count} 个补充文件:");
+                foreach (var supplement in supplementFiles.Take(5)) // 只显示前5个
+                {
+                    Console.WriteLine($"  {supplement.TargetFileName}");
+                }
+                if (supplementFiles.Count > 5)
+                {
+                    Console.WriteLine($"  ... 还有 {supplementFiles.Count - 5} 个文件");
+                }
+            }
+
+            // 数据质量报告
+            Console.WriteLine($"\n📈 数据质量报告:");
+            Console.WriteLine($"  总体完整性: {qualityReport.OverallCompleteness:F1}%");
+            Console.WriteLine($"  有效数据行: {qualityReport.ValidRows}/{qualityReport.TotalRows}");
+            Console.WriteLine($"  缺失数据行: {qualityReport.MissingRows}");
+        }
+
+        // 显示处理结果（阶段2版本，保留向后兼容）
         private static void DisplayProcessingResults(List<ExcelFile> files)
         {
             Console.WriteLine("\n--- 处理结果摘要 ---");
@@ -479,6 +583,45 @@ namespace WorkPartner
 
             // 测试内存使用记录
             Logger.MemoryUsage("测试后");
+        }
+
+        /// <summary>
+        /// 保存处理后的Excel文件
+        /// </summary>
+        /// <param name="processedFiles">处理后的文件列表</param>
+        /// <param name="outputPath">输出目录</param>
+        private static async Task SaveProcessedFiles(List<ExcelFile> processedFiles, string outputPath)
+        {
+            var excelService = new ExcelService();
+            int savedCount = 0;
+            int totalFiles = processedFiles.Count;
+
+            foreach (var file in processedFiles)
+            {
+                try
+                {
+                    var outputFilePath = Path.Combine(outputPath, file.FileName);
+                    var success = await excelService.SaveExcelFileAsync(file, outputFilePath);
+                    
+                    if (success)
+                    {
+                        savedCount++;
+                        Console.WriteLine($"✅ 已保存: {file.FileName}");
+                    }
+                    else
+                    {
+                        Console.WriteLine($"❌ 保存失败: {file.FileName}");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"❌ 保存文件失败: {file.FileName}");
+                    Console.WriteLine($"   错误: {ex.Message}");
+                    Logger.Error($"保存文件失败: {file.FileName}", ex);
+                }
+            }
+
+            Console.WriteLine($"✅ 成功保存 {savedCount}/{totalFiles} 个处理后的文件");
         }
     }
 }
