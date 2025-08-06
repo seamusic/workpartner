@@ -168,6 +168,8 @@ namespace WorkPartner.Utils
 
             if (files == null || !files.Any())
             {
+                // 空列表时认为所有数据都是完整的
+                result.IsAllComplete = true;
                 return result;
             }
 

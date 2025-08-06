@@ -2,6 +2,7 @@ using Xunit;
 using FluentAssertions;
 using WorkPartner.Utils;
 using WorkPartner.Models;
+using ClosedXML.Excel;
 
 namespace WorkPartner.Tests.UnitTests
 {
@@ -158,29 +159,55 @@ namespace WorkPartner.Tests.UnitTests
         public void CreateSupplementFiles_ValidInput_ShouldProcessSuccessfully()
         {
             // Arrange
-            var files = CreateDayMissingOneHour();
+            var tempDir = Path.Combine(Path.GetTempPath(), "WorkPartnerTest", Guid.NewGuid().ToString());
+            Directory.CreateDirectory(tempDir);
+            
+            // 创建真实的测试文件
+            var sourceFilePath = Path.Combine(tempDir, "2025.4.18-08测试项目.xlsx");
+            CreateTestExcelFile(sourceFilePath);
+            
+            var files = new List<ExcelFile>
+            {
+                new ExcelFile
+                {
+                    Date = new DateTime(2025, 4, 18),
+                    Hour = 8,
+                    ProjectName = "测试项目.xlsx",
+                    FileName = "2025.4.18-08测试项目.xlsx",
+                    FilePath = sourceFilePath
+                },
+                new ExcelFile
+                {
+                    Date = new DateTime(2025, 4, 18),
+                    Hour = 16,
+                    ProjectName = "测试项目.xlsx",
+                    FileName = "2025.4.18-16测试项目.xlsx",
+                    FilePath = Path.Combine(tempDir, "2025.4.18-16测试项目.xlsx")
+                }
+            };
+            
             var supplementFiles = DataProcessor.GenerateSupplementFiles(files);
-            var tempOutputDir = Path.Combine(Path.GetTempPath(), "WorkPartnerTest", Guid.NewGuid().ToString());
-            Directory.CreateDirectory(tempOutputDir);
+            var outputDir = Path.Combine(tempDir, "output");
+            Directory.CreateDirectory(outputDir);
 
             try
             {
                 // Act
-                var result = DataProcessor.CreateSupplementFiles(supplementFiles, tempOutputDir);
+                var result = DataProcessor.CreateSupplementFiles(supplementFiles, outputDir);
 
                 // Assert
                 result.Should().BeGreaterThan(0);
                 
                 // 验证文件是否创建成功
-                var createdFiles = Directory.GetFiles(tempOutputDir, "*.xls*");
+                var createdFiles = Directory.GetFiles(outputDir, "*.xls*");
                 createdFiles.Should().NotBeEmpty();
             }
             finally
             {
                 // Cleanup
-                if (Directory.Exists(tempOutputDir))
+                if (Directory.Exists(tempDir))
                 {
-                    Directory.Delete(tempOutputDir, true);
+                    Directory.Delete(tempDir, true);
                 }
             }
         }
@@ -305,6 +332,18 @@ namespace WorkPartner.Tests.UnitTests
                 }
                 // 缺少0点和8点文件
             };
+        }
+
+        private void CreateTestExcelFile(string filePath)
+        {
+            // 创建一个简单的Excel文件用于测试
+            using (var workbook = new ClosedXML.Excel.XLWorkbook())
+            {
+                var worksheet = workbook.Worksheets.Add("Sheet1");
+                worksheet.Cell("A1").Value = "测试数据";
+                worksheet.Cell("B1").Value = 100;
+                workbook.SaveAs(filePath);
+            }
         }
 
         #endregion

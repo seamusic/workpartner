@@ -20,6 +20,7 @@
     <PackageReference Include="EPPlus" Version="7.0.8" />
     <PackageReference Include="NPOI" Version="2.7.1" />
     <PackageReference Include="System.IO.Abstractions.TestingHelpers" Version="21.0.47" />
+    <PackageReference Include="ClosedXML" Version="0.102.2" />
   </ItemGroup>
 
   <ItemGroup>
