@@ -285,6 +285,142 @@ namespace WorkPartner.Utils
         }
 
         /// <summary>
+        /// 记录操作开始
+        /// </summary>
+        /// <param name="operation">操作名称</param>
+        /// <param name="details">操作详情</param>
+        /// <returns>操作跟踪器</returns>
+        public static IDisposable StartOperation(string operation, string? details = null)
+        {
+            var message = string.IsNullOrEmpty(details) ? operation : $"{operation} - {details}";
+            Info($"🔄 开始: {message}");
+            return new OperationTracker(operation, details);
+        }
+
+        /// <summary>
+        /// 记录操作完成
+        /// </summary>
+        /// <param name="operation">操作名称</param>
+        /// <param name="elapsedTime">耗时</param>
+        /// <param name="result">操作结果</param>
+        public static void CompleteOperation(string operation, TimeSpan elapsedTime, string? result = null)
+        {
+            var message = $"✅ 完成: {operation} (耗时: {elapsedTime.TotalMilliseconds:F0}ms)";
+            if (!string.IsNullOrEmpty(result))
+            {
+                message += $" - {result}";
+            }
+            Info(message);
+        }
+
+        /// <summary>
+        /// 记录操作失败
+        /// </summary>
+        /// <param name="operation">操作名称</param>
+        /// <param name="elapsedTime">耗时</param>
+        /// <param name="error">错误信息</param>
+        public static void FailOperation(string operation, TimeSpan elapsedTime, string error)
+        {
+            var message = $"❌ 失败: {operation} (耗时: {elapsedTime.TotalMilliseconds:F0}ms) - {error}";
+            Error(message);
+        }
+
+        /// <summary>
+        /// 记录文件处理开始
+        /// </summary>
+        /// <param name="fileName">文件名</param>
+        /// <param name="action">操作类型</param>
+        public static void StartFileProcessing(string fileName, string action = "处理")
+        {
+            Info($"📄 {action}文件: {fileName}");
+        }
+
+        /// <summary>
+        /// 记录文件处理完成
+        /// </summary>
+        /// <param name="fileName">文件名</param>
+        /// <param name="action">操作类型</param>
+        /// <param name="size">文件大小（字节）</param>
+        /// <param name="recordCount">记录数量</param>
+        public static void CompleteFileProcessing(string fileName, string action = "处理", long? size = null, int? recordCount = null)
+        {
+            var details = new List<string>();
+            if (size.HasValue)
+            {
+                details.Add($"大小: {size.Value / 1024.0:F1}KB");
+            }
+            if (recordCount.HasValue)
+            {
+                details.Add($"记录: {recordCount.Value}条");
+            }
+
+            var detailsStr = details.Any() ? $" ({string.Join(", ", details)})" : "";
+            Info($"✅ {action}完成: {fileName}{detailsStr}");
+        }
+
+        /// <summary>
+        /// 记录批处理进度
+        /// </summary>
+        /// <param name="current">当前处理数量</param>
+        /// <param name="total">总数量</param>
+        /// <param name="currentItem">当前处理项</param>
+        /// <param name="operation">操作名称</param>
+        public static void BatchProgress(int current, int total, string currentItem, string operation = "处理")
+        {
+            var percentage = total > 0 ? (double)current / total * 100 : 0;
+            var progressBar = CreateProgressBar(percentage);
+            var message = $"{operation}: {currentItem}: {current}/{total} ({percentage:F1}%) {progressBar}";
+            
+            // 使用控制台进度显示
+            Console.Write($"\r{message}");
+            
+            if (current >= total)
+            {
+                Console.WriteLine(); // 完成后换行
+                Info($"📊 批处理完成: {operation} {total}项");
+            }
+        }
+
+        /// <summary>
+        /// 记录数据统计
+        /// </summary>
+        /// <param name="category">统计类别</param>
+        /// <param name="statistics">统计数据</param>
+        public static void Statistics(string category, Dictionary<string, object> statistics)
+        {
+            Info($"📊 统计 - {category}:");
+            foreach (var stat in statistics)
+            {
+                Info($"  {stat.Key}: {stat.Value}");
+            }
+        }
+
+        /// <summary>
+        /// 记录验证结果
+        /// </summary>
+        /// <param name="item">验证项</param>
+        /// <param name="isValid">是否有效</param>
+        /// <param name="message">验证消息</param>
+        public static void Validation(string item, bool isValid, string? message = null)
+        {
+            var status = isValid ? "✅" : "❌";
+            var fullMessage = $"{status} 验证: {item}";
+            if (!string.IsNullOrEmpty(message))
+            {
+                fullMessage += $" - {message}";
+            }
+            
+            if (isValid)
+            {
+                Info(fullMessage);
+            }
+            else
+            {
+                Warning(fullMessage);
+            }
+        }
+
+        /// <summary>
         /// 清理日志文件
         /// </summary>
         /// <param name="maxSizeMB">最大文件大小（MB）</param>
@@ -321,6 +457,34 @@ namespace WorkPartner.Utils
             catch
             {
                 // 忽略清理失败
+            }
+        }
+    }
+
+    /// <summary>
+    /// 操作跟踪器
+    /// </summary>
+    internal class OperationTracker : IDisposable
+    {
+        private readonly string _operation;
+        private readonly string? _details;
+        private readonly DateTime _startTime;
+        private bool _disposed = false;
+
+        public OperationTracker(string operation, string? details)
+        {
+            _operation = operation;
+            _details = details;
+            _startTime = DateTime.Now;
+        }
+
+        public void Dispose()
+        {
+            if (!_disposed)
+            {
+                var elapsedTime = DateTime.Now - _startTime;
+                Logger.CompleteOperation(_operation, elapsedTime, _details);
+                _disposed = true;
             }
         }
     }

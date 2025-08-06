@@ -1,4 +1,5 @@
 using WorkPartner.Models;
+using WorkPartner.Utils;
 using OfficeOpenXml;
 using NPOI.HSSF.UserModel; // for .xls files
 using NPOI.SS.UserModel;
@@ -21,8 +22,11 @@ namespace WorkPartner.Services
 
         public ExcelFile ReadExcelFile(string filePath)
         {
-            try
+            return ExceptionHandler.HandleFileRead(() =>
             {
+                using var operation = Logger.StartOperation("读取Excel文件", Path.GetFileName(filePath));
+                Logger.StartFileProcessing(Path.GetFileName(filePath), "读取");
+
                 var fileInfo = new FileInfo(filePath);
                 var excelFile = new ExcelFile
                 {
@@ -34,14 +38,17 @@ namespace WorkPartner.Services
                     IsValid = ValidateExcelFile(filePath)
                 };
 
+                Logger.Validation("文件格式", excelFile.IsValid, excelFile.IsValid ? "Excel格式有效" : "Excel格式无效");
+                Logger.Validation("文件可访问性", !excelFile.IsLocked, excelFile.IsLocked ? "文件被占用" : "文件可访问");
+
                 if (!excelFile.IsValid)
                 {
-                    throw new InvalidOperationException($"Excel文件格式无效: {Path.GetFileName(filePath)}");
+                    throw new WorkPartnerException("InvalidFileFormat", $"Excel文件格式无效: {Path.GetFileName(filePath)}", filePath);
                 }
 
                 if (excelFile.IsLocked)
                 {
-                    throw new InvalidOperationException($"Excel文件被占用: {Path.GetFileName(filePath)}");
+                    throw new WorkPartnerException("FileLocked", $"Excel文件被占用: {Path.GetFileName(filePath)}", filePath);
                 }
 
                 // 读取Excel数据
@@ -146,12 +153,9 @@ namespace WorkPartner.Services
                 }
 
                 excelFile.DataRows = dataRows;
+                Logger.CompleteFileProcessing(Path.GetFileName(filePath), "读取", fileInfo.Length, dataRows.Count);
                 return excelFile;
-            }
-            catch (Exception ex)
-            {
-                throw new InvalidOperationException($"读取Excel文件失败: {Path.GetFileName(filePath)}", ex);
-            }
+            }, filePath);
         }
 
         public async Task<bool> SaveExcelFileAsync(ExcelFile excelFile, string outputPath)
@@ -161,27 +165,35 @@ namespace WorkPartner.Services
 
         public bool SaveExcelFile(ExcelFile excelFile, string outputPath)
         {
-            try
+            return ExceptionHandler.HandleDataFormat(() =>
             {
+                using var operation = Logger.StartOperation("保存Excel文件", Path.GetFileName(outputPath));
+                Logger.StartFileProcessing(Path.GetFileName(outputPath), "保存");
+
                 var extension = Path.GetExtension(excelFile.FilePath).ToLower();
                 
+                bool result;
                 if (extension == ".xls")
                 {
-                    return SaveAsXlsFile(excelFile, outputPath);
+                    result = SaveAsXlsFile(excelFile, outputPath);
                 }
                 else if (extension == ".xlsx")
                 {
-                    return SaveAsXlsxFile(excelFile, outputPath);
+                    result = SaveAsXlsxFile(excelFile, outputPath);
                 }
                 else
                 {
-                    throw new InvalidOperationException($"不支持的文件格式: {extension}");
+                    throw new WorkPartnerException("UnsupportedFormat", $"不支持的文件格式: {extension}", outputPath);
                 }
-            }
-            catch (Exception ex)
-            {
-                throw new InvalidOperationException($"保存Excel文件失败: {Path.GetFileName(outputPath)}", ex);
-            }
+
+                if (result)
+                {
+                    var fileInfo = new FileInfo(outputPath);
+                    Logger.CompleteFileProcessing(Path.GetFileName(outputPath), "保存", fileInfo.Length);
+                }
+                
+                return result;
+            }, $"Excel文件保存 - {Path.GetFileName(outputPath)}", outputPath);
         }
 
         private bool SaveAsXlsFile(ExcelFile excelFile, string outputPath)

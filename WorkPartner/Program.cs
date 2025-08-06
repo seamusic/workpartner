@@ -9,14 +9,18 @@ namespace WorkPartner
     {
         static async Task Main(string[] args)
         {
-            Console.WriteLine("WorkPartner Excel数据处理工具 - 阶段3实现");
+            Console.WriteLine("WorkPartner Excel数据处理工具 - 阶段5增强版");
             Console.WriteLine("==========================================");
 
             // 初始化日志
             Logger.Initialize("logs/workpartner.log", LogLevel.Info);
+            Logger.Info("WorkPartner启动");
+            Logger.MemoryUsage("启动时");
 
             try
             {
+                using var mainOperation = Logger.StartOperation("主程序执行");
+                ExceptionHandler.ClearErrorStatistics();
                 // 解析命令行参数
                 var arguments = ParseCommandLineArguments(args);
                 if (arguments == null)
@@ -95,12 +99,45 @@ namespace WorkPartner
                 // 显示处理结果
                 DisplayProcessingResults(processedFiles, completenessResult, supplementFiles, qualityReport);
 
-                Console.WriteLine("\n✅ 阶段3数据处理逻辑完成！");
+                Console.WriteLine("\n✅ 阶段5数据处理逻辑完成！");
+                
+                // 显示最终统计和错误报告
+                ShowFinalStatistics();
+            }
+            catch (WorkPartnerException ex)
+            {
+                Logger.Error($"WorkPartner专用错误 - {ex.Category}", ex);
+                Console.WriteLine($"\n❌ 程序执行失败 ({ex.Category}): {ex.Message}");
+                if (ex.FilePath != null)
+                {
+                    Console.WriteLine($"   相关文件: {ex.FilePath}");
+                }
+                ShowErrorContext(ex);
             }
             catch (Exception ex)
             {
-                Logger.Error("程序执行过程中发生错误", ex);
+                Logger.Error("程序执行过程中发生未知错误", ex);
                 Console.WriteLine($"\n❌ 程序执行失败: {ex.Message}");
+                Console.WriteLine($"   异常类型: {ex.GetType().Name}");
+            }
+            finally
+            {
+                // 最终清理工作
+                Logger.MemoryUsage("程序结束时");
+                Logger.Info("WorkPartner执行完成");
+                
+                // 显示错误报告
+                var errorReport = ExceptionHandler.GenerateErrorReport();
+                if (!errorReport.Contains("未发现错误"))
+                {
+                    Console.WriteLine("\n📊 错误统计报告:");
+                    Console.WriteLine(errorReport);
+                    Logger.Info("错误统计报告:");
+                    Logger.Info(errorReport);
+                }
+                
+                // 清理日志文件
+                Logger.CleanupLogFile();
             }
 
             Console.WriteLine("\n按任意键退出...");
@@ -239,7 +276,9 @@ namespace WorkPartner
         {
             try
             {
-                Logger.Info($"开始扫描目录: {inputPath}");
+                using var operation = Logger.StartOperation("扫描Excel文件", inputPath);
+                Logger.Info($"验证输入路径: {inputPath}");
+                
                 var fileService = new FileService();
                 var excelFiles = fileService.ScanExcelFiles(inputPath);
                 
@@ -254,7 +293,7 @@ namespace WorkPartner
             catch (Exception ex)
             {
                 Logger.Error($"扫描Excel文件失败", ex);
-                throw;
+                throw new WorkPartnerException("ScanFailed", "文件扫描失败", inputPath, ex);
             }
         }
 
@@ -625,6 +664,40 @@ namespace WorkPartner
             }
 
             Console.WriteLine($"✅ 成功保存 {savedCount}/{totalFiles} 个处理后的文件");
+        }
+
+        /// <summary>
+        /// 显示最终统计信息
+        /// </summary>
+        private static void ShowFinalStatistics()
+        {
+            Logger.MemoryUsage("处理完成时");
+            
+            var stats = new Dictionary<string, object>
+            {
+                ["最终内存使用"] = $"{GC.GetTotalMemory(false) / (1024.0 * 1024.0):F2}MB",
+                ["GC次数 Gen0"] = GC.CollectionCount(0),
+                ["GC次数 Gen1"] = GC.CollectionCount(1), 
+                ["GC次数 Gen2"] = GC.CollectionCount(2)
+            };
+            
+            Logger.Statistics("程序执行", stats);
+        }
+
+        /// <summary>
+        /// 显示错误上下文信息
+        /// </summary>
+        /// <param name="ex">WorkPartner异常</param>
+        private static void ShowErrorContext(WorkPartnerException ex)
+        {
+            if (ex.Context.Any())
+            {
+                Console.WriteLine("   错误上下文:");
+                foreach (var context in ex.Context)
+                {
+                    Console.WriteLine($"     {context.Key}: {context.Value}");
+                }
+            }
         }
     }
 }
