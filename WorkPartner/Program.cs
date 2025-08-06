@@ -600,24 +600,27 @@ namespace WorkPartner
             {
                 try
                 {
-                    var outputFilePath = Path.Combine(outputPath, file.FileName);
+                    // 使用标准化的文件名格式（确保时间点使用零填充）
+                    var standardizedFileName = FileNameParser.GenerateFileName(file.Date, file.Hour, file.ProjectName);
+                    var outputFilePath = Path.Combine(outputPath, standardizedFileName);
                     var success = await excelService.SaveExcelFileAsync(file, outputFilePath);
                     
                     if (success)
                     {
                         savedCount++;
-                        Console.WriteLine($"✅ 已保存: {file.FileName}");
+                        Console.WriteLine($"✅ 已保存: {standardizedFileName}");
                     }
                     else
                     {
-                        Console.WriteLine($"❌ 保存失败: {file.FileName}");
+                        Console.WriteLine($"❌ 保存失败: {standardizedFileName}");
                     }
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine($"❌ 保存文件失败: {file.FileName}");
+                    var displayName = FileNameParser.GenerateFileName(file.Date, file.Hour, file.ProjectName);
+                    Console.WriteLine($"❌ 保存文件失败: {displayName}");
                     Console.WriteLine($"   错误: {ex.Message}");
-                    Logger.Error($"保存文件失败: {file.FileName}", ex);
+                    Logger.Error($"保存文件失败: {displayName}", ex);
                 }
             }
 
