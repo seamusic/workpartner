@@ -10,6 +10,12 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <Compile Remove="logs\**" />
+    <EmbeddedResource Remove="logs\**" />
+    <None Remove="logs\**" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="EPPlus" Version="7.0.8" />
     <PackageReference Include="NPOI" Version="2.7.1" />
     <PackageReference Include="System.IO.Abstractions" Version="21.0.47" />

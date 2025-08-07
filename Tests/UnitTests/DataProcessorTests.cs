@@ -158,6 +158,93 @@ namespace WorkPartner.Tests.UnitTests
         }
 
         [Fact]
+        public void ProcessMissingData_AllEmptyDataRows_ShouldUseAdjacentRowsAverage()
+        {
+            // Arrange - 创建测试数据，模拟您提供的场景
+            var files = new List<ExcelFile>();
+            
+            // 创建3个文件，模拟不同时间点的数据
+            for (int i = 0; i < 3; i++)
+            {
+                var file = new ExcelFile
+                {
+                    Date = new DateTime(2025, 4, 18),
+                    Hour = i * 8, // 0, 8, 16
+                    ProjectName = "测试项目.xlsx",
+                    FileName = $"2025.4.18-{i * 8:D2}测试项目.xlsx",
+                    FilePath = $@"C:\Test\2025.4.18-{i * 8:D2}测试项目.xlsx"
+                };
+
+                var dataRows = new List<DataRow>();
+                
+                // 模拟您提供的数据结构
+                // 02P19Z033 - 有数据
+                dataRows.Add(new DataRow
+                {
+                    Name = "02P19Z033",
+                    Values = new List<double?> { -0.22, -0.15, 0.15, -0.82, -2.09, 0.61 }
+                });
+                
+                // 02P19Z034 - 有数据
+                dataRows.Add(new DataRow
+                {
+                    Name = "02P19Z034",
+                    Values = new List<double?> { 0.27, 0.29, -0.02, -0.36, -1.10, -1.77 }
+                });
+                
+                // 02P19Z041 - 所有文件都为空（这是我们要测试的）
+                dataRows.Add(new DataRow
+                {
+                    Name = "02P19Z041",
+                    Values = new List<double?> { null, null, null, null, null, null }
+                });
+                
+                // 02P19Z042 - 有数据
+                dataRows.Add(new DataRow
+                {
+                    Name = "02P19Z042",
+                    Values = new List<double?> { -0.08, 0.15, -0.01, -1.52, -0.15, 1.60 }
+                });
+                
+                // 02P19Z043 - 有数据
+                dataRows.Add(new DataRow
+                {
+                    Name = "02P19Z043",
+                    Values = new List<double?> { 0.08, -0.05, 0.08, -1.52, 1.69, 2.54 }
+                });
+                
+                file.DataRows = dataRows;
+                files.Add(file);
+            }
+
+            // Act
+            var result = DataProcessor.ProcessMissingData(files);
+
+            // Assert
+            result.Should().NotBeNull();
+            result.Should().HaveCount(3);
+            
+            // 验证02P19Z041行的数据已经被补充
+            foreach (var file in result)
+            {
+                var dataRow = file.DataRows.FirstOrDefault(r => r.Name == "02P19Z041");
+                dataRow.Should().NotBeNull();
+                
+                // 验证所有值都已经被补充（不再是null）
+                dataRow!.Values.Should().NotContainNulls();
+                
+                // 验证补充的值是前一行和后一行的平均值
+                // 前一行02P19Z034的平均值：(0.27 + 0.29 + (-0.02) + (-0.36) + (-1.10) + (-1.77)) / 6 = -0.448
+                // 后一行02P19Z042的平均值：(-0.08 + 0.15 + (-0.01) + (-1.52) + (-0.15) + 1.60) / 6 = 0.000
+                // 期望的平均值：(-0.448 + 0.000) / 2 = -0.224
+                
+                var expectedAverage = -0.224; // 计算出的期望平均值
+                var actualAverage = dataRow.Values.Average();
+                actualAverage.Should().BeApproximately(expectedAverage, 0.01);
+            }
+        }
+
+        [Fact]
         public void CheckCompleteness_EmptyList_ShouldReturnEmptyResult()
         {
             // Arrange

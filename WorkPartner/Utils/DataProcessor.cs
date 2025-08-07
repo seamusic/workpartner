@@ -53,6 +53,11 @@ namespace WorkPartner.Utils
             }
 
             Console.WriteLine($"✅ 缺失数据处理完成，共处理 {totalFiles} 个文件");
+            
+            // 处理所有文件都为空的数据行
+            Console.WriteLine("🔄 处理所有文件都为空的数据行...");
+            ProcessAllEmptyDataRows(sortedFiles);
+            
             return sortedFiles;
         }
 
@@ -189,6 +194,157 @@ namespace WorkPartner.Utils
             }
             
             return null;
+        }
+
+        /// <summary>
+        /// 处理所有文件都为空的数据行，使用前一行和后一行的平均值
+        /// </summary>
+        /// <param name="files">文件列表</param>
+        private static void ProcessAllEmptyDataRows(List<ExcelFile> files)
+        {
+            if (!files.Any()) return;
+
+            // 获取所有唯一的数据行名称
+            var allDataRowNames = files
+                .SelectMany(f => f.DataRows)
+                .Select(r => r.Name)
+                .Distinct()
+                .OrderBy(name => name)
+                .ToList();
+
+            var processedCount = 0;
+            var totalRows = allDataRowNames.Count;
+            var lastProgressTime = DateTime.Now;
+
+            foreach (var dataRowName in allDataRowNames)
+            {
+                // 检查该数据行在所有文件中的值
+                var allValuesForThisRow = new List<double?>();
+                var maxValueCount = 0;
+
+                // 收集所有文件中该数据行的所有值
+                foreach (var file in files)
+                {
+                    var dataRow = file.DataRows.FirstOrDefault(r => r.Name == dataRowName);
+                    if (dataRow != null)
+                    {
+                        allValuesForThisRow.AddRange(dataRow.Values);
+                        maxValueCount = Math.Max(maxValueCount, dataRow.Values.Count);
+                    }
+                }
+
+                // 检查每个值索引位置是否所有文件都为空
+                for (int valueIndex = 0; valueIndex < maxValueCount; valueIndex++)
+                {
+                    var valuesAtThisIndex = new List<double?>();
+                    
+                    foreach (var file in files)
+                    {
+                        var dataRow = file.DataRows.FirstOrDefault(r => r.Name == dataRowName);
+                        if (dataRow != null && valueIndex < dataRow.Values.Count)
+                        {
+                            valuesAtThisIndex.Add(dataRow.Values[valueIndex]);
+                        }
+                    }
+
+                    // 如果该索引位置的所有值都为空，则使用前一行和后一行的平均值
+                    if (valuesAtThisIndex.Any() && valuesAtThisIndex.All(v => !v.HasValue))
+                    {
+                        var supplementValue = CalculateAverageFromAdjacentRows(files, dataRowName, valueIndex);
+                        if (supplementValue.HasValue)
+                        {
+                            // 为所有文件中的该数据行补充值
+                            foreach (var file in files)
+                            {
+                                var dataRow = file.DataRows.FirstOrDefault(r => r.Name == dataRowName);
+                                if (dataRow != null && valueIndex < dataRow.Values.Count)
+                                {
+                                    dataRow.Values[valueIndex] = supplementValue.Value;
+                                }
+                            }
+                        }
+                    }
+                }
+
+                processedCount++;
+                
+                // 每处理10个数据行或每30秒显示一次进度
+                if (processedCount % 10 == 0 || (DateTime.Now - lastProgressTime).TotalSeconds >= 30)
+                {
+                    var progress = (double)processedCount / totalRows * 100;
+                    Console.WriteLine($"📈 空行处理进度: {processedCount}/{totalRows} ({progress:F1}%) - 当前数据行: {dataRowName}");
+                    lastProgressTime = DateTime.Now;
+                }
+            }
+
+            Console.WriteLine($"✅ 空行数据处理完成，共处理 {totalRows} 个数据行");
+        }
+
+        /// <summary>
+        /// 计算前一行和后一行数据的平均值
+        /// </summary>
+        /// <param name="files">文件列表</param>
+        /// <param name="currentDataRowName">当前数据行名称</param>
+        /// <param name="valueIndex">值索引</param>
+        /// <returns>平均值</returns>
+        private static double? CalculateAverageFromAdjacentRows(List<ExcelFile> files, string currentDataRowName, int valueIndex)
+        {
+            // 获取所有数据行名称，按名称排序
+            var allDataRowNames = files
+                .SelectMany(f => f.DataRows)
+                .Select(r => r.Name)
+                .Distinct()
+                .OrderBy(name => name)
+                .ToList();
+
+            var currentIndex = allDataRowNames.IndexOf(currentDataRowName);
+            if (currentIndex == -1) return null;
+
+            var beforeValue = GetValueFromAdjacentRow(files, allDataRowNames, currentIndex - 1, valueIndex);
+            var afterValue = GetValueFromAdjacentRow(files, allDataRowNames, currentIndex + 1, valueIndex);
+
+            if (beforeValue.HasValue && afterValue.HasValue)
+            {
+                return (beforeValue.Value + afterValue.Value) / 2.0;
+            }
+            else if (beforeValue.HasValue)
+            {
+                return beforeValue.Value;
+            }
+            else if (afterValue.HasValue)
+            {
+                return afterValue.Value;
+            }
+
+            return null;
+        }
+
+        /// <summary>
+        /// 从相邻行获取值
+        /// </summary>
+        /// <param name="files">文件列表</param>
+        /// <param name="allDataRowNames">所有数据行名称</param>
+        /// <param name="targetIndex">目标索引</param>
+        /// <param name="valueIndex">值索引</param>
+        /// <returns>值</returns>
+        private static double? GetValueFromAdjacentRow(List<ExcelFile> files, List<string> allDataRowNames, int targetIndex, int valueIndex)
+        {
+            if (targetIndex < 0 || targetIndex >= allDataRowNames.Count)
+                return null;
+
+            var targetDataRowName = allDataRowNames[targetIndex];
+            var validValues = new List<double>();
+
+            foreach (var file in files)
+            {
+                var dataRow = file.DataRows.FirstOrDefault(r => r.Name == targetDataRowName);
+                if (dataRow != null && valueIndex < dataRow.Values.Count && dataRow.Values[valueIndex].HasValue)
+                {
+                    validValues.Add(dataRow.Values[valueIndex].Value);
+                }
+            }
+
+            return validValues.Any() ? validValues.Average() : null;
         }
 
         /// <summary>
