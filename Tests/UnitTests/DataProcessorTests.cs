@@ -359,6 +359,63 @@ namespace WorkPartner.Tests.UnitTests
             result.MissingRows.Should().BeGreaterThan(0);
         }
 
+        [Fact]
+        public void GetPreviousObservationTime_WithPreviousFile_ShouldReturnCorrectTime()
+        {
+            // Arrange
+            var allFiles = CreateTestFilesForA2Update();
+            var supplementFile = new SupplementFileInfo
+            {
+                TargetDate = new DateTime(2025, 4, 16),
+                TargetHour = 8,
+                ProjectName = "测试项目"
+            };
+
+            // Act
+            var result = DataProcessor.GetPreviousObservationTime(supplementFile, allFiles);
+
+            // Assert
+            result.Should().Be("2025-4-16 00:00");
+        }
+
+        [Fact]
+        public void GetPreviousObservationTime_FirstFile_ShouldReturnSameTime()
+        {
+            // Arrange
+            var allFiles = CreateTestFilesForA2Update();
+            var supplementFile = new SupplementFileInfo
+            {
+                TargetDate = new DateTime(2025, 4, 15),
+                TargetHour = 0,
+                ProjectName = "测试项目"
+            };
+
+            // Act
+            var result = DataProcessor.GetPreviousObservationTime(supplementFile, allFiles);
+
+            // Assert
+            result.Should().Be("2025-4-15 00:00");
+        }
+
+        [Fact]
+        public void GetPreviousObservationTime_NoPreviousFile_ShouldReturnSameTime()
+        {
+            // Arrange
+            var allFiles = new List<ExcelFile>();
+            var supplementFile = new SupplementFileInfo
+            {
+                TargetDate = new DateTime(2025, 4, 15),
+                TargetHour = 0,
+                ProjectName = "测试项目"
+            };
+
+            // Act
+            var result = DataProcessor.GetPreviousObservationTime(supplementFile, allFiles);
+
+            // Assert
+            result.Should().Be("2025-4-15 00:00");
+        }
+
         #region Helper Methods
 
         private List<ExcelFile> CreateTestFilesWithMissingData()
@@ -566,6 +623,58 @@ namespace WorkPartner.Tests.UnitTests
                 };
             }
             return files;
+        }
+
+        private List<ExcelFile> CreateTestFilesForA2Update()
+        {
+            return new List<ExcelFile>
+            {
+                new ExcelFile
+                {
+                    Date = new DateTime(2025, 4, 15),
+                    Hour = 16,
+                    ProjectName = "测试项目.xlsx",
+                    DataRows = new List<DataRow>
+                    {
+                        new DataRow
+                        {
+                            Name = "测试数据",
+                            RowIndex = 5,
+                            Values = new List<double?> { 10.0, 5.0, 15.0, 20.0, 25.0, 30.0 }
+                        }
+                    }
+                },
+                new ExcelFile
+                {
+                    Date = new DateTime(2025, 4, 16),
+                    Hour = 0,
+                    ProjectName = "测试项目.xlsx",
+                    DataRows = new List<DataRow>
+                    {
+                        new DataRow
+                        {
+                            Name = "测试数据",
+                            RowIndex = 5,
+                            Values = new List<double?> { 12.0, 6.0, 16.0, 21.0, 26.0, 31.0 }
+                        }
+                    }
+                },
+                new ExcelFile
+                {
+                    Date = new DateTime(2025, 4, 16),
+                    Hour = 16,
+                    ProjectName = "测试项目.xlsx",
+                    DataRows = new List<DataRow>
+                    {
+                        new DataRow
+                        {
+                            Name = "测试数据",
+                            RowIndex = 5,
+                            Values = new List<double?> { 14.0, 7.0, 17.0, 22.0, 27.0, 32.0 }
+                        }
+                    }
+                }
+            };
         }
 
         #endregion

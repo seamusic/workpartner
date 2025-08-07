@@ -21,6 +21,7 @@ namespace WorkPartner
             {
                 using var mainOperation = Logger.StartOperation("主程序执行");
                 ExceptionHandler.ClearErrorStatistics();
+                args = new[] { "E:\\workspace\\gmdi\\tools\\WorkPartner\\excel2" };
                 // 解析命令行参数
                 var arguments = ParseCommandLineArguments(args);
                 if (arguments == null)
@@ -66,22 +67,14 @@ namespace WorkPartner
                 // 阶段3：数据处理逻辑
                 Console.WriteLine("\n🔄 开始阶段3数据处理...");
                 
-                // 3.1 数据补充算法
-                Console.WriteLine("📊 处理缺失数据...");
-                var processedFiles = DataProcessor.ProcessMissingData(filesWithData);
-                
-                // 保存处理后的数据到Excel文件
-                Console.WriteLine("💾 保存处理后的数据...");
-                await SaveProcessedFiles(processedFiles, arguments.OutputPath);
-                
-                // 3.2 数据完整性检查
+                // 3.1 数据完整性检查
                 Console.WriteLine("🔍 检查数据完整性...");
-                var completenessResult = DataProcessor.CheckCompleteness(processedFiles);
+                var completenessResult = DataProcessor.CheckCompleteness(filesWithData);
                 
                 // 生成补充文件列表
-                var supplementFiles = DataProcessor.GenerateSupplementFiles(processedFiles);
+                var supplementFiles = DataProcessor.GenerateSupplementFiles(filesWithData);
                 
-                // 创建补充文件
+                // 创建补充文件（不包含A2列数据修改）
                 if (supplementFiles.Any())
                 {
                     Console.WriteLine($"📁 创建 {supplementFiles.Count} 个补充文件...");
@@ -92,6 +85,15 @@ namespace WorkPartner
                 {
                     Console.WriteLine("ℹ️ 无需创建补充文件，所有时间点数据都完整");
                 }
+                
+                // 3.2 数据补充算法 - 处理所有文件（包括新创建的补充文件）
+                Console.WriteLine("📊 处理缺失数据...");
+                var allFilesForProcessing = DataProcessor.GetAllFilesForProcessing(filesWithData, supplementFiles, arguments.OutputPath);
+                var processedFiles = DataProcessor.ProcessMissingData(allFilesForProcessing);
+                
+                // 保存处理后的数据到Excel文件（包含A2列更新）
+                Console.WriteLine("💾 保存处理后的数据并更新A2列...");
+                await SaveProcessedFiles(processedFiles, arguments.OutputPath);
                 
                 // 数据质量验证
                 var qualityReport = DataProcessor.ValidateDataQuality(processedFiles);
@@ -652,16 +654,37 @@ namespace WorkPartner
             int totalFiles = processedFiles.Count;
             var lastProgressTime = DateTime.Now;
 
-            for (int i = 0; i < processedFiles.Count; i++)
+            // 按日期和时间排序文件
+            var sortedFiles = processedFiles.OrderBy(f => f.Date).ThenBy(f => f.Hour).ToList();
+
+            for (int i = 0; i < sortedFiles.Count; i++)
             {
-                var file = processedFiles[i];
+                var file = sortedFiles[i];
                 
                 try
                 {
                     // 使用标准化的文件名格式（确保时间点使用零填充）
                     var standardizedFileName = FileNameParser.GenerateFileName(file.Date, file.Hour, file.ProjectName);
                     var outputFilePath = Path.Combine(outputPath, standardizedFileName);
-                    var success = await excelService.SaveExcelFileAsync(file, outputFilePath);
+                    
+                    // 确定本期观测时间
+                    var currentObservationTime = $"{file.Date:yyyy-M-d} {file.Hour:00}:00";
+                    
+                    // 确定上期观测时间
+                    string previousObservationTime;
+                    if (i > 0)
+                    {
+                        var previousFile = sortedFiles[i - 1];
+                        previousObservationTime = $"{previousFile.Date:yyyy-M-d} {previousFile.Hour:00}:00";
+                    }
+                    else
+                    {
+                        // 如果是第一个文件，使用当前时间作为上期观测时间
+                        previousObservationTime = currentObservationTime;
+                    }
+                    
+                    // 保存文件并同时更新A2列
+                    var success = excelService.SaveExcelFileWithA2Update(file, outputFilePath, currentObservationTime, previousObservationTime);
                     
                     if (success)
                     {

@@ -65,5 +65,15 @@ namespace WorkPartner.Services
         /// <param name="filePath">文件路径</param>
         /// <returns>是否被占用</returns>
         bool IsFileLocked(string filePath);
+
+        /// <summary>
+        /// 保存Excel文件并更新A2列内容
+        /// </summary>
+        /// <param name="excelFile">Excel文件对象</param>
+        /// <param name="outputPath">输出路径</param>
+        /// <param name="currentObservationTime">本期观测时间</param>
+        /// <param name="previousObservationTime">上期观测时间</param>
+        /// <returns>是否保存成功</returns>
+        bool SaveExcelFileWithA2Update(ExcelFile excelFile, string outputPath, string currentObservationTime, string previousObservationTime);
     }
 } 

@@ -1,4 +1,8 @@
 using WorkPartner.Models;
+using WorkPartner.Services;
+using OfficeOpenXml;
+using NPOI.HSSF.UserModel;
+using NPOI.SS.UserModel;
 
 namespace WorkPartner.Utils
 {
@@ -551,6 +555,205 @@ namespace WorkPartner.Utils
         }
 
         /// <summary>
+        /// 创建补充文件并修改A2列数据内容
+        /// </summary>
+        /// <param name="supplementFiles">补充文件信息列表</param>
+        /// <param name="outputDirectory">输出目录</param>
+        /// <param name="allFiles">所有文件列表（用于确定上期观测时间）</param>
+        /// <returns>创建的文件数量</returns>
+        public static int CreateSupplementFilesWithA2Update(List<SupplementFileInfo> supplementFiles, string outputDirectory, List<ExcelFile> allFiles)
+        {
+            if (supplementFiles == null || !supplementFiles.Any())
+            {
+                return 0;
+            }
+
+            if (!Directory.Exists(outputDirectory))
+            {
+                Directory.CreateDirectory(outputDirectory);
+            }
+
+            int createdCount = 0;
+
+            foreach (var supplementFile in supplementFiles)
+            {
+                try
+                {
+                    // 优先从输出目录中查找已处理的源文件
+                    var processedSourcePath = Path.Combine(outputDirectory, supplementFile.SourceFile.FileName);
+                    string sourceFilePath;
+                    
+                    if (File.Exists(processedSourcePath))
+                    {
+                        // 使用已处理的文件作为源文件
+                        sourceFilePath = processedSourcePath;
+                        Console.WriteLine($"✅ 使用已处理的源文件: {supplementFile.SourceFile.FileName}");
+                    }
+                    else
+                    {
+                        // 回退到原始文件
+                        sourceFilePath = supplementFile.SourceFile.FilePath;
+                        Console.WriteLine($"⚠️  使用原始源文件: {Path.GetFileName(sourceFilePath)}");
+                    }
+                    
+                    var targetFilePath = Path.Combine(outputDirectory, supplementFile.TargetFileName);
+
+                    // 复制源文件到目标位置
+                    File.Copy(sourceFilePath, targetFilePath, true);
+                    
+                    // 修改A2列数据内容
+                    UpdateA2CellContent(targetFilePath, supplementFile, allFiles);
+                    
+                    createdCount++;
+                    
+                    Console.WriteLine($"✅ 已创建补充文件: {supplementFile.TargetFileName}");
+                    Console.WriteLine($"   源文件: {Path.GetFileName(sourceFilePath)}");
+                    Console.WriteLine($"   A2列已更新: 本期观测 {supplementFile.TargetDate:yyyy-M-d} {supplementFile.TargetHour:00}:00");
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"❌ 创建补充文件失败: {supplementFile.TargetFileName}");
+                    Console.WriteLine($"   错误: {ex.Message}");
+                }
+            }
+
+            return createdCount;
+        }
+
+        /// <summary>
+        /// 更新Excel文件的A2列内容
+        /// </summary>
+        /// <param name="filePath">文件路径</param>
+        /// <param name="supplementFile">补充文件信息</param>
+        /// <param name="allFiles">所有文件列表</param>
+        private static void UpdateA2CellContent(string filePath, SupplementFileInfo supplementFile, List<ExcelFile> allFiles)
+        {
+            try
+            {
+                var extension = Path.GetExtension(filePath).ToLower();
+                
+                if (extension == ".xlsx")
+                {
+                    UpdateA2CellContentXlsx(filePath, supplementFile, allFiles);
+                }
+                else if (extension == ".xls")
+                {
+                    UpdateA2CellContentXls(filePath, supplementFile, allFiles);
+                }
+                else
+                {
+                    Console.WriteLine($"⚠️  不支持的文件格式: {extension}");
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"❌ 更新A2列内容失败: {Path.GetFileName(filePath)}");
+                Console.WriteLine($"   错误: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// 更新XLSX文件的A2列内容
+        /// </summary>
+        private static void UpdateA2CellContentXlsx(string filePath, SupplementFileInfo supplementFile, List<ExcelFile> allFiles)
+        {
+            using var package = new OfficeOpenXml.ExcelPackage(new FileInfo(filePath));
+            var worksheet = package.Workbook.Worksheets.FirstOrDefault();
+            
+            if (worksheet == null)
+            {
+                throw new InvalidOperationException("Excel文件中没有找到工作表");
+            }
+
+            // 确定本期观测时间
+            var currentObservationTime = $"{supplementFile.TargetDate:yyyy-M-d} {supplementFile.TargetHour:00}:00";
+            
+            // 确定上期观测时间
+            var previousObservationTime = GetPreviousObservationTime(supplementFile, allFiles);
+            
+            // 更新A2列内容
+            var a2Content = $"本期观测：{currentObservationTime} 上期观测：{previousObservationTime}";
+            worksheet.Cells["A2"].Value = a2Content;
+            
+            package.Save();
+        }
+
+        /// <summary>
+        /// 更新XLS文件的A2列内容
+        /// </summary>
+        private static void UpdateA2CellContentXls(string filePath, SupplementFileInfo supplementFile, List<ExcelFile> allFiles)
+        {
+            using var stream = new FileStream(filePath, FileMode.Open, FileAccess.ReadWrite);
+            var workbook = new NPOI.HSSF.UserModel.HSSFWorkbook(stream);
+            var worksheet = workbook.GetSheetAt(0);
+            
+            // 确定本期观测时间
+            var currentObservationTime = $"{supplementFile.TargetDate:yyyy-M-d} {supplementFile.TargetHour:00}:00";
+            
+            // 确定上期观测时间
+            var previousObservationTime = GetPreviousObservationTime(supplementFile, allFiles);
+            
+            // 更新A2列内容
+            var a2Content = $"本期观测：{currentObservationTime} 上期观测：{previousObservationTime}";
+            var cell = worksheet.GetRow(1)?.GetCell(0) ?? worksheet.CreateRow(1).CreateCell(0);
+            cell.SetCellValue(a2Content);
+            
+            stream.Position = 0;
+            workbook.Write(stream);
+        }
+
+        /// <summary>
+        /// 获取上期观测时间
+        /// </summary>
+        /// <param name="supplementFile">补充文件信息</param>
+        /// <param name="allFiles">所有文件列表</param>
+        /// <returns>上期观测时间字符串</returns>
+        public static string GetPreviousObservationTime(SupplementFileInfo supplementFile, List<ExcelFile> allFiles)
+        {
+            // 按时间顺序排序所有文件
+            var sortedFiles = allFiles.OrderBy(f => f.Date).ThenBy(f => f.Hour).ToList();
+            
+            // 找到当前文件在排序列表中的位置
+            var currentFileIndex = sortedFiles.FindIndex(f => 
+                f.Date.Date == supplementFile.TargetDate.Date && f.Hour == supplementFile.TargetHour);
+            
+            // 如果找不到当前文件，说明这是一个新创建的文件
+            if (currentFileIndex == -1)
+            {
+                // 找到目标时间点之前的最后一个文件
+                var previousFile = sortedFiles
+                    .Where(f => f.Date.Date < supplementFile.TargetDate.Date || 
+                               (f.Date.Date == supplementFile.TargetDate.Date && f.Hour < supplementFile.TargetHour))
+                    .OrderBy(f => f.Date).ThenBy(f => f.Hour)
+                    .LastOrDefault();
+                
+                if (previousFile != null)
+                {
+                    return $"{previousFile.Date:yyyy-M-d} {previousFile.Hour:00}:00";
+                }
+                else
+                {
+                    // 如果没有找到前一个文件，使用当前时间作为上期观测时间
+                    return $"{supplementFile.TargetDate:yyyy-M-d} {supplementFile.TargetHour:00}:00";
+                }
+            }
+            else
+            {
+                // 如果找到了当前文件，获取前一个文件
+                if (currentFileIndex > 0)
+                {
+                    var previousFile = sortedFiles[currentFileIndex - 1];
+                    return $"{previousFile.Date:yyyy-M-d} {previousFile.Hour:00}:00";
+                }
+                else
+                {
+                    // 如果是第一个文件，使用当前时间作为上期观测时间
+                    return $"{supplementFile.TargetDate:yyyy-M-d} {supplementFile.TargetHour:00}:00";
+                }
+            }
+        }
+
+        /// <summary>
         /// 验证数据质量
         /// </summary>
         /// <param name="files">文件列表</param>
@@ -585,6 +788,201 @@ namespace WorkPartner.Utils
 
             report.OverallCompleteness = report.TotalRows > 0 ? (double)report.ValidRows / report.TotalRows * 100 : 0;
             return report;
+        }
+
+        /// <summary>
+        /// 获取所有需要处理的文件（包括原始文件和补充文件）
+        /// </summary>
+        /// <param name="originalFiles">原始文件列表</param>
+        /// <param name="supplementFiles">补充文件信息列表</param>
+        /// <param name="outputDirectory">输出目录</param>
+        /// <returns>所有需要处理的文件列表</returns>
+        public static List<ExcelFile> GetAllFilesForProcessing(List<ExcelFile> originalFiles, List<SupplementFileInfo> supplementFiles, string outputDirectory)
+        {
+            var allFiles = new List<ExcelFile>(originalFiles);
+            
+            // 为补充文件创建ExcelFile对象
+            foreach (var supplementFile in supplementFiles)
+            {
+                var supplementFilePath = Path.Combine(outputDirectory, supplementFile.TargetFileName);
+                
+                if (File.Exists(supplementFilePath))
+                {
+                    // 创建补充文件的ExcelFile对象
+                    var supplementExcelFile = new ExcelFile
+                    {
+                        FilePath = supplementFilePath,
+                        FileName = supplementFile.TargetFileName,
+                        Date = supplementFile.TargetDate,
+                        Hour = supplementFile.TargetHour,
+                        ProjectName = supplementFile.ProjectName,
+                        FileSize = new FileInfo(supplementFilePath).Length,
+                        LastModified = new FileInfo(supplementFilePath).LastWriteTime,
+                        IsValid = true
+                    };
+                    
+                    // 读取补充文件的数据
+                    try
+                    {
+                        var excelService = new ExcelService();
+                        var supplementFileWithData = excelService.ReadExcelFile(supplementFilePath);
+                        supplementExcelFile.DataRows = supplementFileWithData.DataRows;
+                        supplementExcelFile.IsValid = supplementFileWithData.IsValid;
+                        supplementExcelFile.IsLocked = supplementFileWithData.IsLocked;
+                        
+                        allFiles.Add(supplementExcelFile);
+                        Console.WriteLine($"✅ 已加载补充文件数据: {supplementFile.TargetFileName}");
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"❌ 读取补充文件失败: {supplementFile.TargetFileName} - {ex.Message}");
+                    }
+                }
+            }
+            
+            // 按时间顺序排序
+            allFiles.Sort((a, b) =>
+            {
+                var dateComparison = a.Date.CompareTo(b.Date);
+                if (dateComparison != 0)
+                    return dateComparison;
+                return a.Hour.CompareTo(b.Hour);
+            });
+            
+            Console.WriteLine($"📊 准备处理 {allFiles.Count} 个文件（原始文件: {originalFiles.Count}, 补充文件: {supplementFiles.Count}）");
+            return allFiles;
+        }
+
+        /// <summary>
+        /// 为所有文件更新A2列数据内容
+        /// </summary>
+        /// <param name="files">文件列表</param>
+        /// <param name="outputDirectory">输出目录</param>
+        /// <returns>更新的文件数量</returns>
+        public static int UpdateA2ColumnForAllFiles(List<ExcelFile> files, string outputDirectory)
+        {
+            if (files == null || !files.Any())
+            {
+                return 0;
+            }
+            
+            int updatedCount = 0;
+            var sortedFiles = files.OrderBy(f => f.Date).ThenBy(f => f.Hour).ToList();
+            
+            Console.WriteLine($"📝 开始更新A2列内容，共 {files.Count} 个文件...");
+            
+            for (int i = 0; i < sortedFiles.Count; i++)
+            {
+                var currentFile = sortedFiles[i];
+                var filePath = Path.Combine(outputDirectory, currentFile.FileName);
+                
+                if (!File.Exists(filePath))
+                {
+                    Console.WriteLine($"⚠️  文件不存在，跳过A2列更新: {currentFile.FileName}");
+                    continue;
+                }
+                
+                try
+                {
+                    // 确定本期观测时间
+                    var currentObservationTime = $"{currentFile.Date:yyyy-M-d} {currentFile.Hour:00}:00";
+                    
+                    // 确定上期观测时间
+                    string previousObservationTime;
+                    if (i > 0)
+                    {
+                        var previousFile = sortedFiles[i - 1];
+                        previousObservationTime = $"{previousFile.Date:yyyy-M-d} {previousFile.Hour:00}:00";
+                    }
+                    else
+                    {
+                        // 如果是第一个文件，使用当前时间作为上期观测时间
+                        previousObservationTime = currentObservationTime;
+                    }
+                    
+                    // 更新A2列内容
+                    UpdateA2CellContentForFile(filePath, currentObservationTime, previousObservationTime);
+                    
+                    updatedCount++;
+                    
+                    if (updatedCount % 10 == 0)
+                    {
+                        Console.WriteLine($"📈 A2列更新进度: {updatedCount}/{files.Count}");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"❌ 更新A2列失败: {currentFile.FileName} - {ex.Message}");
+                }
+            }
+            
+            return updatedCount;
+        }
+
+        /// <summary>
+        /// 为单个文件更新A2列内容
+        /// </summary>
+        /// <param name="filePath">文件路径</param>
+        /// <param name="currentObservationTime">本期观测时间</param>
+        /// <param name="previousObservationTime">上期观测时间</param>
+        private static void UpdateA2CellContentForFile(string filePath, string currentObservationTime, string previousObservationTime)
+        {
+            try
+            {
+                var extension = Path.GetExtension(filePath).ToLower();
+                var a2Content = $"本期观测：{currentObservationTime} 上期观测：{previousObservationTime}";
+                
+                if (extension == ".xlsx")
+                {
+                    UpdateA2CellContentXlsxForFile(filePath, a2Content);
+                }
+                else if (extension == ".xls")
+                {
+                    UpdateA2CellContentXlsForFile(filePath, a2Content);
+                }
+                else
+                {
+                    Console.WriteLine($"⚠️  不支持的文件格式: {extension}");
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"❌ 更新A2列内容失败: {Path.GetFileName(filePath)}");
+                Console.WriteLine($"   错误: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// 更新XLSX文件的A2列内容
+        /// </summary>
+        private static void UpdateA2CellContentXlsxForFile(string filePath, string a2Content)
+        {
+            using var package = new OfficeOpenXml.ExcelPackage(new FileInfo(filePath));
+            var worksheet = package.Workbook.Worksheets.FirstOrDefault();
+            
+            if (worksheet == null)
+            {
+                throw new InvalidOperationException("Excel文件中没有找到工作表");
+            }
+            
+            worksheet.Cells["A2"].Value = a2Content;
+            package.Save();
+        }
+
+        /// <summary>
+        /// 更新XLS文件的A2列内容
+        /// </summary>
+        private static void UpdateA2CellContentXlsForFile(string filePath, string a2Content)
+        {
+            using var stream = new FileStream(filePath, FileMode.Open, FileAccess.ReadWrite);
+            var workbook = new NPOI.HSSF.UserModel.HSSFWorkbook(stream);
+            var worksheet = workbook.GetSheetAt(0);
+            
+            var cell = worksheet.GetRow(1)?.GetCell(0) ?? worksheet.CreateRow(1).CreateCell(0);
+            cell.SetCellValue(a2Content);
+            
+            stream.Position = 0;
+            workbook.Write(stream);
         }
     }
 
