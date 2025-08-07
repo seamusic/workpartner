@@ -21,7 +21,7 @@ namespace WorkPartner
             {
                 using var mainOperation = Logger.StartOperation("主程序执行");
                 ExceptionHandler.ClearErrorStatistics();
-                args = new[] { "E:\\workspace\\gmdi\\tools\\WorkPartner\\excel2" };
+
                 // 解析命令行参数
                 var arguments = ParseCommandLineArguments(args);
                 if (arguments == null)

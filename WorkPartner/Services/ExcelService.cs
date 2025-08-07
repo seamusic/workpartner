@@ -12,8 +12,10 @@ namespace WorkPartner.Services
     {
         public ExcelService()
         {
-            // 设置EPPlus许可证模式
-            ExcelPackage.LicenseContext = LicenseContext.NonCommercial;
+            // 设置EPPlus许可证模式 - EPPlus 8.0+ 新方式
+            // 使用新的许可证设置方式
+            ExcelPackage.License.SetNonCommercialOrganization("Starzero");
+            ExcelPackage.License.SetNonCommercialPersonal("Lee");
         }
 
         public async Task<ExcelFile> ReadExcelFileAsync(string filePath)

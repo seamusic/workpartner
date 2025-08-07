@@ -87,11 +87,12 @@ namespace WorkPartner.Utils
                 
                 if (excelSection.Exists())
                 {
-                    StartRow = excelSection.GetValue<int>("StartRow", DEFAULT_START_ROW);
-                    EndRow = excelSection.GetValue<int>("EndRow", DEFAULT_END_ROW);
-                    StartCol = excelSection.GetValue<int>("StartCol", DEFAULT_START_COL);
-                    EndCol = excelSection.GetValue<int>("EndCol", DEFAULT_END_COL);
-                    NameCol = excelSection.GetValue<int>("NameCol", DEFAULT_NAME_COL);
+                    // 使用安全的配置读取方式，避免AOT编译问题
+                    StartRow = GetIntValue(excelSection, "StartRow", DEFAULT_START_ROW);
+                    EndRow = GetIntValue(excelSection, "EndRow", DEFAULT_END_ROW);
+                    StartCol = GetIntValue(excelSection, "StartCol", DEFAULT_START_COL);
+                    EndCol = GetIntValue(excelSection, "EndCol", DEFAULT_END_COL);
+                    NameCol = GetIntValue(excelSection, "NameCol", DEFAULT_NAME_COL);
                     
                     Logger.Info("从appsettings.json加载Excel配置");
                     Logger.Info($"配置参数: StartRow={StartRow}, EndRow={EndRow}, StartCol={StartCol}, EndCol={EndCol}, NameCol={NameCol}");
@@ -326,6 +327,39 @@ namespace WorkPartner.Utils
             }
             
             return isValid;
+        }
+        
+        /// <summary>
+        /// 安全地从配置节读取整数值
+        /// 避免AOT编译时的RequiresUnreferencedCodeAttribute警告
+        /// </summary>
+        /// <param name="section">配置节</param>
+        /// <param name="key">配置键</param>
+        /// <param name="defaultValue">默认值</param>
+        /// <returns>配置值或默认值</returns>
+        private static int GetIntValue(IConfigurationSection section, string key, int defaultValue)
+        {
+            try
+            {
+                var value = section[key];
+                if (string.IsNullOrEmpty(value))
+                {
+                    return defaultValue;
+                }
+                
+                if (int.TryParse(value, out int result))
+                {
+                    return result;
+                }
+                
+                Logger.Warning($"配置值 '{key}' 不是有效的整数: {value}，使用默认值: {defaultValue}");
+                return defaultValue;
+            }
+            catch (Exception ex)
+            {
+                Logger.Warning($"读取配置值 '{key}' 时出错: {ex.Message}，使用默认值: {defaultValue}");
+                return defaultValue;
+            }
         }
         
         /// <summary>
