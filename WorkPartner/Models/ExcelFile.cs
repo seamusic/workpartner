@@ -71,6 +71,16 @@ namespace WorkPartner.Models
         public string? ErrorMessage { get; set; }
 
         /// <summary>
+        /// 是否为补充文件
+        /// </summary>
+        public bool IsSupplementFile { get; set; } = false;
+
+        /// <summary>
+        /// 补充文件的源文件信息
+        /// </summary>
+        public SupplementFileInfo? SupplementSource { get; set; }
+
+        /// <summary>
         /// 获取文件大小（KB）
         /// </summary>
         public double FileSizeKB => FileSize / 1024.0;

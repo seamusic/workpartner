@@ -2,6 +2,11 @@
 using WorkPartner.Utils;
 using WorkPartner.Services;
 using System.IO;
+using NPOI.HSSF.UserModel;
+using NPOI.SS.UserModel;
+using System;
+using System.Collections.Generic;
+using System.Linq;
 
 namespace WorkPartner
 {
@@ -22,7 +27,28 @@ namespace WorkPartner
                 using var mainOperation = Logger.StartOperation("主程序执行");
                 ExceptionHandler.ClearErrorStatistics();
 
+                //// 检查Excel文件第185行数据
+                //Console.WriteLine("🔍 检查Excel文件第185行数据...");
+                //CheckExcelRow185Data();
+
+                //// 测试第185行补数逻辑
+                //Console.WriteLine("\n🧪 测试第185行补数逻辑...");
+                //TestRow185SupplementLogic();
+
+                //// 测试通用行缺失数据检查功能
+                //Console.WriteLine("\n🔍 测试通用行缺失数据检查功能...");
+                //TestGeneralRowMissingDataCheck();
+
+                //// 直接测试DataProcessor通用行缺失数据检查功能
+                //Console.WriteLine("\n🧪 直接测试DataProcessor通用行缺失数据检查功能...");
+                //TestDataProcessorGeneralRowCheck();
+
+                //// 检查第200行补数逻辑问题
+                //Console.WriteLine("\n🔍 检查第200行补数逻辑问题...");
+                //CheckRow200SupplementLogic();
+
                 // 解析命令行参数
+                args = new[] { "E:\\workspace\\gmdi\\tools\\WorkPartner\\excel" };
                 var arguments = ParseCommandLineArguments(args);
                 if (arguments == null)
                 {
@@ -750,6 +776,483 @@ namespace WorkPartner
                 {
                     Console.WriteLine($"     {context.Key}: {context.Value}");
                 }
+            }
+        }
+        
+        /// <summary>
+        /// 检查Excel文件第185行数据
+        /// </summary>
+        static void CheckExcelRow185Data()
+        {
+            var excelDir = Path.Combine(Directory.GetCurrentDirectory(), "..", "excel");
+            if (!Directory.Exists(excelDir))
+            {
+                Console.WriteLine($"❌ Excel目录不存在: {excelDir}");
+                return;
+            }
+            
+            var excelFiles = Directory.GetFiles(excelDir, "*.xls").ToList();
+            Console.WriteLine($"📁 找到 {excelFiles.Count} 个Excel文件");
+            
+            foreach (var filePath in excelFiles.Take(3)) // 只检查前3个文件
+            {
+                Console.WriteLine($"\n📄 检查文件: {Path.GetFileName(filePath)}");
+                CheckSingleExcelFile(filePath);
+            }
+        }
+        
+        /// <summary>
+        /// 检查单个Excel文件的第185行数据
+        /// </summary>
+        static void CheckSingleExcelFile(string filePath)
+        {
+            try
+            {
+                using (var fs = new FileStream(filePath, FileMode.Open, FileAccess.Read))
+                {
+                    var workbook = new HSSFWorkbook(fs);
+                    var sheet = workbook.GetSheetAt(0);
+                    
+                    // 检查第184、185、186行数据
+                    for (int rowIndex = 183; rowIndex <= 185; rowIndex++) // 0基索引，所以184行是183
+                    {
+                        var row = sheet.GetRow(rowIndex);
+                        if (row != null)
+                        {
+                            Console.WriteLine($"第{rowIndex + 1}行数据:");
+                            
+                            // 检查D列到I列（索引3-8）
+                            for (int colIndex = 3; colIndex <= 8; colIndex++)
+                            {
+                                var cell = row.GetCell(colIndex);
+                                var value = GetCellValue(cell);
+                                var colName = GetColumnName(colIndex);
+                                Console.WriteLine($"  {colName}: {value}");
+                            }
+                        }
+                        else
+                        {
+                            Console.WriteLine($"第{rowIndex + 1}行: 空行");
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"❌ 读取文件失败: {ex.Message}");
+            }
+        }
+        
+        /// <summary>
+        /// 获取单元格值
+        /// </summary>
+        static string GetCellValue(ICell? cell)
+        {
+            if (cell == null) return "空";
+            
+            switch (cell.CellType)
+            {
+                case CellType.Numeric:
+                    return cell.NumericCellValue.ToString("F2");
+                case CellType.String:
+                    return cell.StringCellValue;
+                case CellType.Boolean:
+                    return cell.BooleanCellValue.ToString();
+                case CellType.Formula:
+                    return $"公式:{cell.CellFormula}";
+                default:
+                    return "未知类型";
+            }
+        }
+        
+        /// <summary>
+        /// 获取列名
+        /// </summary>
+        static string GetColumnName(int colIndex)
+        {
+            return ((char)('A' + colIndex)).ToString();
+        }
+
+        /// <summary>
+        /// 测试第185行补数逻辑
+        /// </summary>
+        static void TestRow185SupplementLogic()
+        {
+            Console.WriteLine("\n--- 测试第185行补数逻辑 ---");
+
+            var excelDir = Path.Combine(Directory.GetCurrentDirectory(), "..", "excel");
+            if (!Directory.Exists(excelDir))
+            {
+                Console.WriteLine($"❌ Excel目录不存在: {excelDir}");
+                return;
+            }
+
+            var excelFiles = Directory.GetFiles(excelDir, "*.xls").ToList();
+            if (excelFiles.Count == 0)
+            {
+                Console.WriteLine("❌ 未找到任何Excel文件");
+                return;
+            }
+
+            var fileService = new FileService();
+            var excelService = new ExcelService();
+
+            foreach (var filePath in excelFiles)
+            {
+                Console.WriteLine($"\n📄 测试文件: {Path.GetFileName(filePath)}");
+                try
+                {
+                    var workbook = new HSSFWorkbook(new FileStream(filePath, FileMode.Open, FileAccess.Read));
+                    var sheet = workbook.GetSheetAt(0);
+
+                    // 获取第185行数据
+                    var row185 = sheet.GetRow(184); // 0基索引
+                    if (row185 == null)
+                    {
+                        Console.WriteLine("❌ 文件缺少第185行数据");
+                        continue;
+                    }
+
+                    Console.WriteLine("🔍 检查第185行数据:");
+                    for (int colIndex = 3; colIndex <= 8; colIndex++) // D到I列
+                    {
+                        var cell = row185.GetCell(colIndex);
+                        var value = GetCellValue(cell);
+                        var colName = GetColumnName(colIndex);
+                        Console.WriteLine($"  {colName}: {value}");
+                    }
+
+                    // 模拟保存过程
+                    var currentObservationTime = $"{DateTime.Now:yyyy-M-d} {DateTime.Now.Hour:00}:00";
+                    var previousObservationTime = $"{DateTime.Now.AddHours(-1):yyyy-M-d} {DateTime.Now.AddHours(-1).Hour:00}:00";
+
+                    Console.WriteLine($"\n💾 模拟保存文件: {Path.GetFileName(filePath)}");
+                    Console.WriteLine($"  本期观测时间: {currentObservationTime}");
+                    Console.WriteLine($"  上期观测时间: {previousObservationTime}");
+
+                    var success = excelService.SaveExcelFileWithA2Update(null, filePath, currentObservationTime, previousObservationTime); // 模拟保存
+
+                    if (success)
+                    {
+                        Console.WriteLine("✅ 模拟保存成功");
+                        Console.WriteLine("🔍 重新检查第185行数据:");
+                        for (int colIndex = 3; colIndex <= 8; colIndex++) // D到I列
+                        {
+                            var cell = row185.GetCell(colIndex);
+                            var value = GetCellValue(cell);
+                            var colName = GetColumnName(colIndex);
+                            Console.WriteLine($"  {colName}: {value}");
+                        }
+                    }
+                    else
+                    {
+                        Console.WriteLine("❌ 模拟保存失败");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"❌ 测试文件失败: {ex.Message}");
+                }
+            }
+        }
+
+        /// <summary>
+        /// 测试通用行缺失数据检查功能
+        /// </summary>
+        static void TestGeneralRowMissingDataCheck()
+        {
+            Console.WriteLine("\n--- 测试通用行缺失数据检查功能 ---");
+
+            var excelDir = Path.Combine(Directory.GetCurrentDirectory(), "..", "excel");
+            if (!Directory.Exists(excelDir))
+            {
+                Console.WriteLine($"❌ Excel目录不存在: {excelDir}");
+                return;
+            }
+
+            var excelFiles = Directory.GetFiles(excelDir, "*.xls").ToList();
+            if (excelFiles.Count == 0)
+            {
+                Console.WriteLine("❌ 未找到任何Excel文件");
+                return;
+            }
+
+            var fileService = new FileService();
+            var excelService = new ExcelService();
+
+            foreach (var filePath in excelFiles)
+            {
+                Console.WriteLine($"\n📄 测试文件: {Path.GetFileName(filePath)}");
+                try
+                {
+                    var workbook = new HSSFWorkbook(new FileStream(filePath, FileMode.Open, FileAccess.Read));
+                    var sheet = workbook.GetSheetAt(0);
+
+                    // 获取第185行数据
+                    var row185 = sheet.GetRow(184); // 0基索引
+                    if (row185 == null)
+                    {
+                        Console.WriteLine("❌ 文件缺少第185行数据");
+                        continue;
+                    }
+
+                    Console.WriteLine("🔍 检查第185行数据:");
+                    for (int colIndex = 3; colIndex <= 8; colIndex++) // D到I列
+                    {
+                        var cell = row185.GetCell(colIndex);
+                        var value = GetCellValue(cell);
+                        var colName = GetColumnName(colIndex);
+                        Console.WriteLine($"  {colName}: {value}");
+                    }
+
+                    // 模拟保存过程
+                    var currentObservationTime = $"{DateTime.Now:yyyy-M-d} {DateTime.Now.Hour:00}:00";
+                    var previousObservationTime = $"{DateTime.Now.AddHours(-1):yyyy-M-d} {DateTime.Now.AddHours(-1).Hour:00}:00";
+
+                    Console.WriteLine($"\n💾 模拟保存文件: {Path.GetFileName(filePath)}");
+                    Console.WriteLine($"  本期观测时间: {currentObservationTime}");
+                    Console.WriteLine($"  上期观测时间: {previousObservationTime}");
+
+                    var success = excelService.SaveExcelFileWithA2Update(null, filePath, currentObservationTime, previousObservationTime); // 模拟保存
+
+                    if (success)
+                    {
+                        Console.WriteLine("✅ 模拟保存成功");
+                        Console.WriteLine("🔍 重新检查第185行数据:");
+                        for (int colIndex = 3; colIndex <= 8; colIndex++) // D到I列
+                        {
+                            var cell = row185.GetCell(colIndex);
+                            var value = GetCellValue(cell);
+                            var colName = GetColumnName(colIndex);
+                            Console.WriteLine($"  {colName}: {value}");
+                        }
+                    }
+                    else
+                    {
+                        Console.WriteLine("❌ 模拟保存失败");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"❌ 测试文件失败: {ex.Message}");
+                }
+            }
+        }
+
+        /// <summary>
+        /// 直接测试DataProcessor通用行缺失数据检查功能
+        /// </summary>
+        static void TestDataProcessorGeneralRowCheck()
+        {
+            Console.WriteLine("\n--- 直接测试DataProcessor通用行缺失数据检查功能 ---");
+
+            var excelDir = Path.Combine(Directory.GetCurrentDirectory(), "..", "excel");
+            if (!Directory.Exists(excelDir))
+            {
+                Console.WriteLine($"❌ Excel目录不存在: {excelDir}");
+                return;
+            }
+
+            var excelFiles = Directory.GetFiles(excelDir, "*.xls").ToList();
+            if (excelFiles.Count == 0)
+            {
+                Console.WriteLine("❌ 未找到任何Excel文件");
+                return;
+            }
+
+            var fileService = new FileService();
+            var excelService = new ExcelService();
+
+            // 读取所有Excel文件
+            var allExcelFiles = new List<WorkPartner.Models.ExcelFile>();
+            
+            foreach (var filePath in excelFiles)
+            {
+                try
+                {
+                    Console.WriteLine($"📄 读取文件: {Path.GetFileName(filePath)}");
+                    var excelFile = excelService.ReadExcelFile(filePath);
+                    if (excelFile != null)
+                    {
+                        allExcelFiles.Add(excelFile);
+                        Console.WriteLine($"✅ 成功读取文件，包含 {excelFile.DataRows.Count} 个数据行");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"❌ 读取文件失败: {ex.Message}");
+                }
+            }
+
+            if (allExcelFiles.Count == 0)
+            {
+                Console.WriteLine("❌ 没有成功读取任何文件");
+                return;
+            }
+
+            Console.WriteLine($"\n🔍 开始使用DataProcessor处理 {allExcelFiles.Count} 个文件...");
+            
+            try
+            {
+                // 调用DataProcessor处理缺失数据
+                var processedFiles = WorkPartner.Utils.DataProcessor.ProcessMissingData(allExcelFiles);
+                
+                Console.WriteLine($"✅ DataProcessor处理完成，共处理 {processedFiles.Count} 个文件");
+                
+                // 检查处理结果
+                foreach (var file in processedFiles)
+                {
+                    Console.WriteLine($"\n📊 检查处理后的文件: {file.FileName}");
+                    
+                    // 查找第185行
+                    var row185 = file.DataRows.FirstOrDefault(r => r.RowIndex == 185);
+                    if (row185 != null)
+                    {
+                        Console.WriteLine("🔍 第185行处理结果:");
+                        for (int i = 0; i < Math.Min(row185.Values.Count, 6); i++)
+                        {
+                            var value = row185.Values[i];
+                            var colName = GetColumnName(i);
+                            if (value.HasValue)
+                            {
+                                Console.WriteLine($"  {colName}: {value:F2}");
+                            }
+                            else
+                            {
+                                Console.WriteLine($"  {colName}: 仍然为空");
+                            }
+                        }
+                    }
+                    else
+                    {
+                        Console.WriteLine("❌ 未找到第185行数据");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"❌ DataProcessor处理失败: {ex.Message}");
+                Console.WriteLine($"   异常详情: {ex}");
+            }
+        }
+
+        /// <summary>
+        /// 检查第200行补数逻辑问题
+        /// </summary>
+        static void CheckRow200SupplementLogic()
+        {
+            Console.WriteLine("\n--- 检查第200行补数逻辑问题 ---");
+
+            var excelDir = Path.Combine(Directory.GetCurrentDirectory(), "..", "excel");
+            var processedDir = Path.Combine(excelDir, "processed");
+            
+            if (!Directory.Exists(excelDir))
+            {
+                Console.WriteLine($"❌ Excel目录不存在: {excelDir}");
+                return;
+            }
+
+            if (!Directory.Exists(processedDir))
+            {
+                Console.WriteLine($"❌ 处理后目录不存在: {processedDir}");
+                return;
+            }
+
+            // 检查原始文件
+            Console.WriteLine("\n📁 检查原始文件第200行数据:");
+            var originalFiles = new[] 
+            {
+                "2025.4.18-0云港城项目4#地块.xls",
+                "2025.4.18-8云港城项目4#地块.xls", 
+                "2025.4.18-16云港城项目4#地块.xls"
+            };
+
+            foreach (var fileName in originalFiles)
+            {
+                var filePath = Path.Combine(excelDir, fileName);
+                if (File.Exists(filePath))
+                {
+                    CheckRow200InFile(filePath, "原始文件");
+                }
+                else
+                {
+                    Console.WriteLine($"❌ 文件不存在: {fileName}");
+                }
+            }
+
+            // 检查处理后文件
+            Console.WriteLine("\n📁 检查处理后文件第200行数据:");
+            var processedFiles = new[] 
+            {
+                "2025.4.18-00云港城项目4#地块.xls",
+                "2025.4.18-08云港城项目4#地块.xls", 
+                "2025.4.18-16云港城项目4#地块.xls"
+            };
+
+            foreach (var fileName in processedFiles)
+            {
+                var filePath = Path.Combine(processedDir, fileName);
+                if (File.Exists(filePath))
+                {
+                    CheckRow200InFile(filePath, "处理后文件");
+                }
+                else
+                {
+                    Console.WriteLine($"❌ 文件不存在: {fileName}");
+                }
+            }
+
+            // 分析补数逻辑
+            Console.WriteLine("\n🔍 分析补数逻辑问题:");
+            Console.WriteLine("问题描述: 原始文件第200行数据为空，处理后文件第200行均被填充为相同值");
+            Console.WriteLine("可能原因:");
+            Console.WriteLine("1. 补数算法使用了固定的默认值");
+            Console.WriteLine("2. 相邻行数据获取失败，使用了硬编码的备用值");
+            Console.WriteLine("3. 随机种子固定，导致所有文件生成相同值");
+            Console.WriteLine("4. 补数逻辑中存在全局共享的默认值");
+        }
+
+        /// <summary>
+        /// 检查文件中第200行的数据
+        /// </summary>
+        static void CheckRow200InFile(string filePath, string fileType)
+        {
+            try
+            {
+                using (var fs = new FileStream(filePath, FileMode.Open, FileAccess.Read))
+                {
+                    var workbook = new HSSFWorkbook(fs);
+                    var sheet = workbook.GetSheetAt(0);
+
+                    Console.WriteLine($"\n📄 {fileType}: {Path.GetFileName(filePath)}");
+
+                    // 检查第199、200、201行数据（0基索引）
+                    for (int rowIndex = 198; rowIndex <= 200; rowIndex++)
+                    {
+                        var row = sheet.GetRow(rowIndex);
+                        if (row != null)
+                        {
+                            Console.WriteLine($"第{rowIndex + 1}行数据:");
+                            
+                            // 检查D列到I列（索引3-8）
+                            for (int colIndex = 3; colIndex <= 8; colIndex++)
+                            {
+                                var cell = row.GetCell(colIndex);
+                                var value = GetCellValue(cell);
+                                var colName = GetColumnName(colIndex);
+                                Console.WriteLine($"  {colName}: {value}");
+                            }
+                        }
+                        else
+                        {
+                            Console.WriteLine($"第{rowIndex + 1}行: 空行");
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"❌ 读取文件失败: {ex.Message}");
             }
         }
     }
