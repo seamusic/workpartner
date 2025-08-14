@@ -2329,48 +2329,73 @@ namespace WorkPartner.Utils
             var cacheHits = 0;
             var cacheMisses = 0;
 
-            foreach (var missingTime in period.MissingTimes)
+            // 按时间顺序处理每个缺失时间点
+            for (int timeIndex = 0; timeIndex < period.MissingTimes.Count; timeIndex++)
             {
+                var missingTime = period.MissingTimes[timeIndex];
+                
                 foreach (var dataRowName in period.MissingDataRows)
                 {
-                    var cacheKey = $"missing_period_{dataRowName}_{missingTime:yyyyMMddHH}";
-
-                    if (cache != null)
+                    // 找到数据行
+                    var targetFile = files.FirstOrDefault(f => 
+                        f.Date.Date == missingTime.Date && f.Hour == missingTime.Hour);
+                    
+                    if (targetFile == null) continue;
+                    
+                    var dataRow = targetFile.DataRows.FirstOrDefault(r => r.Name == dataRowName);
+                    if (dataRow == null) continue;
+                    
+                    // 处理数据行中的每个缺失值
+                    for (int valueIndex = 0; valueIndex < dataRow.Values.Count; valueIndex++)
                     {
-                        var cachedValue = cache.Get<double?>(cacheKey);
-                        if (cachedValue.HasValue)
+                        if (dataRow.Values[valueIndex].HasValue) continue; // 跳过已有值
+                        
+                        var cacheKey = $"missing_period_{dataRowName}_{valueIndex}_{missingTime:yyyyMMddHH}";
+                        
+                        if (cache != null)
                         {
-                            cacheHits++;
-                            continue;
+                            var cachedValue = cache.Get<double?>(cacheKey);
+                            if (cachedValue.HasValue)
+                            {
+                                dataRow.Values[valueIndex] = cachedValue.Value;
+                                cacheHits++;
+                                continue;
+                            }
                         }
-                    }
-
-
-                    //TODO:这里的取数逻辑有问题，如某一行数据的数据为空，应该是取前后期取平均值，但GetNearestValidValueForDataRow获取的，是该行所有的值取平均，不正确
-                    var missingPoint = new MissingDataPoint
-                    {
-                        DataRowName = dataRowName,
-                        TimePoint = missingTime,
-                        PreviousValue = GetNearestValidValueForDataRow(files, dataRowName, missingTime, true),
-                        NextValue = GetNearestValidValueForDataRow(files, dataRowName, missingTime, false)
-                    };
-
-                    if (missingPoint.PreviousValue.HasValue && missingPoint.NextValue.HasValue)
-                    {
-                        missingPoint.BaseValue = (missingPoint.PreviousValue.Value + missingPoint.NextValue.Value) / 2;
-                        var adjustedValue = CalculateAdjustedValueForMissingPoint(missingPoint, period, config);
-
-                        // 缓存结果
-                        cache?.Set(cacheKey, adjustedValue);
-                        processings++;
-                    }
-                    else
-                    {
-                        cacheMisses++;
+                        
+                        // 获取对应列的前后有效值
+                        var (previousValue, nextValue) = GetNearestValuesForTimePoint(
+                            files, dataRowName, missingTime, valueIndex);
+                        
+                        if (previousValue.HasValue && nextValue.HasValue)
+                        {
+                            var missingPoint = new MissingDataPoint
+                            {
+                                DataRowName = dataRowName,
+                                ValueIndex = valueIndex,
+                                TimePoint = missingTime,
+                                PreviousValue = previousValue,
+                                NextValue = nextValue,
+                                BaseValue = (previousValue.Value + nextValue.Value) / 2
+                            };
+                            
+                            var adjustedValue = CalculateAdjustedValueForMissingPoint(missingPoint, period, config);
+                            
+                            // 应用调整后的值
+                            dataRow.Values[valueIndex] = adjustedValue;
+                            
+                            // 缓存结果
+                            cache?.Set(cacheKey, adjustedValue);
+                            processings++;
+                        }
+                        else
+                        {
+                            cacheMisses++;
+                        }
                     }
                 }
             }
-
+            
             return (processings, cacheHits, cacheMisses);
         }
 
@@ -2517,6 +2542,52 @@ namespace WorkPartner.Utils
                     }
                 }
             }
+        }
+
+        /// <summary>
+        /// 获取指定时间点对应列的前后有效值
+        /// </summary>
+        private static (double? PreviousValue, double? NextValue) GetNearestValuesForTimePoint(
+            List<ExcelFile> files, 
+            string dataRowName, 
+            DateTime targetTime,
+            int valueIndex)
+        {
+            // 找到目标时间在文件列表中的位置
+            var targetIndex = files.FindIndex(f => 
+                f.Date.Date == targetTime.Date && f.Hour == targetTime.Hour);
+            
+            if (targetIndex == -1) return (null, null);
+            
+            // 向前搜索有效值（对应列）
+            double? previousValue = null;
+            for (int i = targetIndex - 1; i >= 0; i--)
+            {
+                var file = files[i];
+                var dataRow = file.DataRows.FirstOrDefault(r => r.Name == dataRowName);
+                if (dataRow != null && valueIndex < dataRow.Values.Count && 
+                    dataRow.Values[valueIndex].HasValue)
+                {
+                    previousValue = dataRow.Values[valueIndex].Value;
+                    break;
+                }
+            }
+            
+            // 向后搜索有效值（对应列）
+            double? nextValue = null;
+            for (int i = targetIndex + 1; i < files.Count; i++)
+            {
+                var file = files[i];
+                var dataRow = file.DataRows.FirstOrDefault(r => r.Name == dataRowName);
+                if (dataRow != null && valueIndex < dataRow.Values.Count && 
+                    dataRow.Values[valueIndex].HasValue)
+                {
+                    nextValue = dataRow.Values[valueIndex].Value;
+                    break;
+                }
+            }
+            
+            return (previousValue, nextValue);
         }
     }
 } 
