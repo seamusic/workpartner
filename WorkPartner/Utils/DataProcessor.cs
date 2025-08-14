@@ -178,6 +178,220 @@ namespace WorkPartner.Utils
         }
 
         /// <summary>
+        /// 验证并重新计算第4、5、6列的值，确保符合"1. 基本逻辑重构"的要求
+        /// 逻辑：本期4列=本期6列值-上期6列值，本期5列=本期6列值-上期6列值，本期6列=本期6列值-上期6列值
+        /// 如果变化量超过阈值，则重新计算累计值
+        /// </summary>
+        /// <param name="files">已处理的文件列表</param>
+        /// <param name="config">配置参数</param>
+        /// <returns>处理后的文件列表</returns>
+        public static List<ExcelFile> ValidateAndRecalculateColumns456(List<ExcelFile> files, DataProcessorConfig? config = null)
+        {
+            config ??= DataProcessorConfig.Default;
+
+            Console.WriteLine("🔍 开始验证并修正第4、5、6列数据，确保符合基本逻辑重构要求...");
+            Console.WriteLine($"⚙️ 验证配置: 误差容忍度={config.ColumnValidationTolerance:P0}, 累计值调整阈值={config.CumulativeAdjustmentThreshold:F2}");
+
+            if (files == null || !files.Any())
+            {
+                Console.WriteLine("⚠️ 文件列表为空，无需验证");
+                return new List<ExcelFile>();
+            }
+
+            // 按时间顺序排序文件
+            var sortedFiles = files.OrderBy(f => f.Date).ThenBy(f => f.Hour).ToList();
+            var totalColumnCorrections = 0;
+            var totalCumulativeAdjustments = 0;
+
+            Console.WriteLine($"📊 开始验证并修正 {sortedFiles.Count} 个文件的数据逻辑...");
+
+            // 从第二个文件开始处理（需要上一期的数据）
+            for (int i = 1; i < sortedFiles.Count; i++)
+            {
+                var currentFile = sortedFiles[i];
+                var previousFile = sortedFiles[i - 1];
+                var fileColumnCorrections = 0;
+                var fileCumulativeAdjustments = 0;
+
+                Console.WriteLine($"\n📅 处理文件: {currentFile.Date:yyyy-MM-dd} {currentFile.Hour:D2}:00 (对比上一期: {previousFile.Date:yyyy-MM-dd} {previousFile.Hour:D2}:00)");
+
+                foreach (var dataRow in currentFile.DataRows)
+                {
+                    // 验证并修正第4、5、6列的值
+                    var (columnCorrections, cumulativeAdjustments) = ValidateAndCorrectRowColumns456(dataRow, previousFile, config);
+                    fileColumnCorrections += columnCorrections;
+                    fileCumulativeAdjustments += cumulativeAdjustments;
+                }
+
+                if (fileColumnCorrections > 0 || fileCumulativeAdjustments > 0)
+                {
+                    Console.WriteLine($"📊 文件 {currentFile.Date:yyyy-MM-dd} {currentFile.Hour:D2}:00 修正完成:");
+                    Console.WriteLine($"   - 修正第4、5、6列值: {fileColumnCorrections} 个");
+                    Console.WriteLine($"   - 调整累计值: {fileCumulativeAdjustments} 个");
+                }
+
+                totalColumnCorrections += fileColumnCorrections;
+                totalCumulativeAdjustments += fileCumulativeAdjustments;
+            }
+
+            Console.WriteLine($"\n✅ 第4、5、6列验证和修正完成:");
+            Console.WriteLine($"   - 总修正第4、5、6列值: {totalColumnCorrections} 个");
+            Console.WriteLine($"   - 总调整累计值: {totalCumulativeAdjustments} 个");
+            Console.WriteLine($"   - 总修正操作: {totalColumnCorrections + totalCumulativeAdjustments} 个");
+
+            return sortedFiles;
+        }
+
+        /// <summary>
+        /// 验证并修正单个数据行的第4、5、6列值
+        /// </summary>
+        /// <param name="currentRow">当前数据行</param>
+        /// <param name="previousFile">上一期文件</param>
+        /// <param name="config">配置参数</param>
+        /// <returns>(修正的列值数量, 调整的累计值数量)</returns>
+        private static (int ColumnCorrections, int CumulativeAdjustments) ValidateAndCorrectRowColumns456(DataRow currentRow, ExcelFile previousFile, DataProcessorConfig config)
+        {
+            var columnCorrections = 0;
+            var cumulativeAdjustments = 0;
+
+            // 获取上一期对应的数据行
+            var previousRow = previousFile.DataRows.FirstOrDefault(r => r.Name == currentRow.Name);
+            if (previousRow == null) return (0, 0);
+
+            // 检查第4、5、6列（索引为3、4、5）
+            var columnsToCheck = new[] { 3, 4, 5 }; // 对应第4、5、6列
+            var baseColumnIndex = 5; // 第6列作为基准列（累计值）
+
+            // 确保基准列（第6列）有值
+            if (!currentRow.Values[baseColumnIndex].HasValue || !previousRow.Values[baseColumnIndex].HasValue)
+            {
+                return (0, 0);
+            }
+
+            foreach (var columnIndex in columnsToCheck)
+            {
+                // 确保列索引在有效范围内
+                if (columnIndex >= currentRow.Values.Count)
+                    continue;
+
+                var currentCumulativeValue = currentRow.Values[columnIndex].Value;
+                var previousCumulativeValue = previousRow.Values[columnIndex].Value;
+                // 计算期望的变化量：本期变化量 = 本期累计值 - 上期累计值
+                var expectedChangeAmount = currentCumulativeValue - previousCumulativeValue;
+
+
+                // 检查是否需要调整累计值
+                if (Math.Abs(expectedChangeAmount) > config.CumulativeAdjustmentThreshold)
+                {
+                    // 变化量超过阈值，需要重新计算累计值
+                    Console.WriteLine($"    ⚠️ 变化量 {Math.Abs(expectedChangeAmount):F2} 超过阈值 {config.CumulativeAdjustmentThreshold:F2}，需要调整累计值");
+
+                    var currentValue1 = currentRow.Values[columnIndex - 3];
+                    if (currentValue1.HasValue)
+                    {
+
+                        // 重新计算累计值：新累计值 = 上期累计值 + 期望变化量
+                        var newCumulativeValue = previousCumulativeValue + currentValue1.Value;
+
+                        // 如果调整幅度过大，采用保守策略
+                        var adjustmentAmount = Math.Abs(newCumulativeValue - currentCumulativeValue);
+                        if (adjustmentAmount > config.CumulativeAdjustmentThreshold * 2)
+                        {
+                            // 调整幅度过大，采用保守策略：使用当前变化量的平均值
+                            var conservativeChangeAmount = expectedChangeAmount * 0.5; // 使用50%的变化量
+                            newCumulativeValue = previousCumulativeValue + conservativeChangeAmount;
+                            Console.WriteLine($"    🔧 采用保守策略: 变化量从 {expectedChangeAmount:F2} 调整为 {conservativeChangeAmount:F2}");
+                        }
+
+                        // 应用新的累计值
+                        currentRow.Values[columnIndex] = newCumulativeValue;
+                        cumulativeAdjustments++;
+
+                        Console.WriteLine($"    🔧 调整累计值: {currentCumulativeValue:F2} → {newCumulativeValue:F2}");
+                    }
+                }
+
+                var currentValue = currentRow.Values[columnIndex - 3];
+                var isCurrentColumnHasValue = currentValue.HasValue;
+
+                if (isCurrentColumnHasValue)
+                {
+                    // 如果当前列有值，检查是否符合逻辑
+                    var actualChangeAmount = currentValue.Value;
+                    var difference = Math.Abs(actualChangeAmount - expectedChangeAmount);
+
+                    if (difference > config.ColumnValidationTolerance)
+                    {
+                        // 变化量不符合期望，需要修正
+                        Console.WriteLine($"    🔄 修正第{columnIndex + 1}列: 当前值={actualChangeAmount:F2}, 期望值={expectedChangeAmount:F2}, 差异={difference:F2}");
+                        currentRow.Values[columnIndex-3] = expectedChangeAmount;
+                        columnCorrections++;
+                    }
+                }
+                else
+                {
+                    // 如果当前列为空，直接填入期望的变化量
+                    Console.WriteLine($"    ➕ 填充第{columnIndex + 1}列: 期望变化量={expectedChangeAmount:F2}");
+                    currentRow.Values[columnIndex-3] = expectedChangeAmount;
+                    columnCorrections++;
+                }
+            }
+
+            return (columnCorrections, cumulativeAdjustments);
+        }
+
+        /// <summary>
+        /// 调整累计值以修正变化量过大的问题
+        /// </summary>
+        /// <param name="currentRow">当前数据行</param>
+        /// <param name="previousRow">上一期数据行</param>
+        /// <param name="changeColumnIndex">变化列索引（第4、5、6列）</param>
+        /// <param name="cumulativeColumnIndex">累计列索引（第6列）</param>
+        /// <param name="currentValue">当前值</param>
+        /// <param name="expectedValue">期望值</param>
+        /// <param name="config">配置参数</param>
+        /// <returns>是否进行了调整</returns>
+        private static bool AdjustCumulativeValue(DataRow currentRow, DataRow previousRow,
+            int changeColumnIndex, int cumulativeColumnIndex,
+            double currentValue, double expectedValue, DataProcessorConfig config)
+        {
+            try
+            {
+                // 获取上一期的累计值
+                var previousCumulativeValue = previousRow.Values[cumulativeColumnIndex];
+                if (!previousCumulativeValue.HasValue)
+                    return false;
+
+                // 计算新的累计值：新累计值 = 上期累计值 + 当前变化值
+                var newCumulativeValue = previousCumulativeValue.Value + currentValue;
+
+                // 检查调整后的累计值是否合理
+                var adjustmentAmount = Math.Abs(newCumulativeValue - currentRow.Values[cumulativeColumnIndex].Value);
+
+                // 如果调整幅度过大，可能需要进一步处理
+                if (adjustmentAmount > config.CumulativeAdjustmentThreshold * 2)
+                {
+                    // 调整幅度过大，采用更保守的策略
+                    // 将累计值调整为：上期累计值 + 期望变化值
+                    newCumulativeValue = previousCumulativeValue.Value + expectedValue;
+                    Console.WriteLine($"⚠️ 调整幅度过大，采用保守策略: {currentRow.Name} 第{cumulativeColumnIndex + 1}列");
+                }
+
+                // 应用新的累计值
+                currentRow.Values[cumulativeColumnIndex] = newCumulativeValue;
+
+                Console.WriteLine($"🔧 累计值调整: {currentRow.Name} 第{cumulativeColumnIndex + 1}列: {currentRow.Values[cumulativeColumnIndex]:F2} → {newCumulativeValue:F2}");
+
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"❌ 累计值调整失败 {currentRow.Name}: {ex.Message}");
+                return false;
+            }
+        }
+
+        /// <summary>
         /// 处理累计变化量计算
         /// </summary>
         private static void ProcessCumulativeChanges(List<ExcelFile> sortedFiles, DataProcessorConfig config)
@@ -288,35 +502,44 @@ namespace WorkPartner.Utils
         }
 
         /// <summary>
-        /// 处理连续缺失数据的差异化
-        /// </summary>
-        private static void ProcessConsecutiveMissingData(List<ExcelFile> files, DataProcessorConfig config)
-        {
-            var missingPeriods = IdentifyMissingPeriods(files);
-
-            foreach (var period in missingPeriods)
-            {
-                ProcessMissingPeriod(period, files, config);
-            }
-        }
-
-        /// <summary>
         /// 处理连续缺失数据的差异化（优化版本）
         /// </summary>
         private static (int Processings, int CacheHits, int CacheMisses) ProcessConsecutiveMissingDataOptimized(
             List<ExcelFile> files, DataProcessorConfig config, DataCache? cache, PerformanceMetrics metrics)
         {
+            Console.WriteLine("🔍 开始识别连续缺失时间段...");
             var missingPeriods = IdentifyMissingPeriods(files);
+            Console.WriteLine($"📊 识别到 {missingPeriods.Count} 个连续缺失时间段");
+
             var processings = 0;
             var cacheHits = 0;
             var cacheMisses = 0;
+            var totalPeriods = missingPeriods.Count;
+            var lastProgressTime = DateTime.Now;
 
-            foreach (var period in missingPeriods)
+            for (int i = 0; i < missingPeriods.Count; i++)
             {
+                var period = missingPeriods[i];
+                var currentTime = DateTime.Now;
+
+                // 显示当前处理的缺失时间段信息
+                if (config.EnableDetailedLogging || (currentTime - lastProgressTime).TotalSeconds >= 10)
+                {
+                    var progress = (double)(i + 1) / totalPeriods * 100;
+                    Console.WriteLine($"🔄 处理进度: {i + 1}/{totalPeriods} ({progress:F1}%) - 当前处理: {period.StartTime:yyyy-MM-dd HH:mm} 到 {period.EndTime:yyyy-MM-dd HH:mm}, 缺失 {period.MissingHours} 小时");
+                    lastProgressTime = currentTime;
+                }
+
                 var (proc, hits, misses) = ProcessMissingPeriodOptimized(period, files, config, cache);
                 processings += proc;
                 cacheHits += hits;
                 cacheMisses += misses;
+
+                // 每处理5个时间段显示一次详细进度
+                if ((i + 1) % 5 == 0)
+                {
+                    Console.WriteLine($"📈 已处理 {i + 1}/{totalPeriods} 个时间段，累计处理 {processings} 个缺失数据点");
+                }
             }
 
             // 更新性能指标
@@ -324,6 +547,7 @@ namespace WorkPartner.Utils
             metrics.CacheHits += cacheHits;
             metrics.CacheMisses += cacheMisses;
 
+            Console.WriteLine($"✅ 连续缺失数据处理完成，共处理 {processings} 个缺失数据点");
             return (processings, cacheHits, cacheMisses);
         }
 
@@ -342,15 +566,35 @@ namespace WorkPartner.Utils
                 .OrderBy(name => name)
                 .ToList();
 
+            Console.WriteLine($"🔍 开始分析 {allDataRowNames.Count} 个数据行的缺失情况...");
+            var lastProgressTime = DateTime.Now;
+
             // 为每个数据行识别连续缺失时间段
-            foreach (var dataRowName in allDataRowNames)
+            for (int i = 0; i < allDataRowNames.Count; i++)
             {
+                var dataRowName = allDataRowNames[i];
+                var currentTime = DateTime.Now;
+
+                // 每处理10个数据行或每15秒显示一次进度
+                if ((i + 1) % 10 == 0 || (currentTime - lastProgressTime).TotalSeconds >= 15)
+                {
+                    var progress = (double)(i + 1) / allDataRowNames.Count * 100;
+                    Console.WriteLine($"🔍 识别进度: {i + 1}/{allDataRowNames.Count} ({progress:F1}%) - 当前分析: {dataRowName}");
+                    lastProgressTime = currentTime;
+                }
+
                 var periodsForRow = IdentifyMissingPeriodsForDataRow(dataRowName, sortedFiles);
                 missingPeriods.AddRange(periodsForRow);
             }
 
+            Console.WriteLine($"📊 识别完成，共发现 {missingPeriods.Count} 个缺失时间段");
+
             // 合并重叠的时间段
-            return MergeOverlappingPeriods(missingPeriods);
+            Console.WriteLine("🔄 开始合并重叠的时间段...");
+            var mergedPeriods = MergeOverlappingPeriods(missingPeriods);
+            Console.WriteLine($"✅ 合并完成，最终有 {mergedPeriods.Count} 个时间段");
+
+            return mergedPeriods;
         }
 
         /// <summary>
@@ -1163,7 +1407,7 @@ namespace WorkPartner.Utils
 
             // 获取配置
             var config = DataProcessorConfig.Default;
-            
+
             // 获取所有可能的行索引
             var allRowIndices = files
                 .SelectMany(f => f.DataRows)
@@ -1192,12 +1436,12 @@ namespace WorkPartner.Utils
             foreach (var file in files)
             {
                 Console.WriteLine($"📁 检查文件: {file.FileName}");
-                
+
                 foreach (var rowIndex in allRowIndices)
                 {
                     // 查找指定行号的DataRow
                     var dataRow = file.DataRows.FirstOrDefault(r => r.RowIndex == rowIndex);
-                    if (dataRow == null) 
+                    if (dataRow == null)
                     {
                         Console.WriteLine($"⚠️ 文件 {file.FileName} 中未找到第{rowIndex}行对应的DataRow");
                         continue;
@@ -1206,7 +1450,7 @@ namespace WorkPartner.Utils
                     // 检查该行是否存在缺失数据
                     var hasMissingData = false;
                     var missingColumns = new List<int>();
-                    
+
                     for (int colIndex = 0; colIndex < dataRow.Values.Count && colIndex < 6; colIndex++)
                     {
                         if (!dataRow.Values[colIndex].HasValue)
@@ -1231,17 +1475,17 @@ namespace WorkPartner.Utils
                     if (hasMissingData)
                     {
                         Console.WriteLine($"⚠️ 发现第{rowIndex}行存在缺失数据，缺失列: [{string.Join(", ", missingColumns.Select(c => GetColumnName(c)))}]，开始补充...");
-                        
+
                         // 第一步：补充D列到I列的缺失值（使用相邻行的平均值）
                         ProcessRowMissingDataByAverage(file, rowIndex, files);
-                        
+
                         // 第二步：处理累计变化量逻辑
                         ProcessRowCumulativeChanges(file, rowIndex, config);
                     }
                     else if (rowIndex == 200)
                     {
                         Console.WriteLine($"ℹ️ 第200行没有检测到缺失数据，但强制处理...");
-                        
+
                         // 强制处理第200行
                         ProcessRowMissingDataByAverage(file, rowIndex, files);
                         ProcessRowCumulativeChanges(file, rowIndex, config);
@@ -1259,7 +1503,7 @@ namespace WorkPartner.Utils
         private static void ProcessRowMissingDataByAverage(ExcelFile file, int rowIndex, List<ExcelFile> files)
         {
             var dataRow = file.DataRows.FirstOrDefault(r => r.RowIndex == rowIndex);
-            if (dataRow == null) 
+            if (dataRow == null)
             {
                 Console.WriteLine($"⚠️ 第{rowIndex}行未找到对应的DataRow");
                 return;
@@ -1277,7 +1521,7 @@ namespace WorkPartner.Utils
                 if (!dataRow.Values[colIndex].HasValue)
                 {
                     Console.WriteLine($"🔍 第{rowIndex}行{GetColumnName(colIndex)}列为空，尝试获取相邻行数据...");
-                    
+
                     var valuePrevious = GetValueFromRowAndColumn(files, file, previousRowIndex, colIndex);
                     var valueNext = GetValueFromRowAndColumn(files, file, nextRowIndex, colIndex);
 
@@ -1304,7 +1548,7 @@ namespace WorkPartner.Utils
                     {
                         // 如果相邻行都没有值，尝试使用其他策略
                         Console.WriteLine($"⚠️ 第{rowIndex}行{GetColumnName(colIndex)}列无法获取相邻行值，尝试其他策略...");
-                        
+
                         // 策略1：尝试从其他文件获取相同行的数据
                         var otherFileValue = GetValueFromOtherFiles(files, file, rowIndex, colIndex);
                         if (otherFileValue.HasValue)
@@ -1335,18 +1579,18 @@ namespace WorkPartner.Utils
         private static double? GetValueFromOtherFiles(List<ExcelFile> files, ExcelFile currentFile, int rowIndex, int colIndex)
         {
             var validValues = new List<double>();
-            
+
             foreach (var file in files)
             {
                 if (file == currentFile) continue; // 跳过当前文件
-                
+
                 var dataRow = file.DataRows.FirstOrDefault(r => r.RowIndex == rowIndex);
                 if (dataRow != null && colIndex < dataRow.Values.Count && dataRow.Values[colIndex].HasValue)
                 {
                     validValues.Add(dataRow.Values[colIndex].Value);
                 }
             }
-            
+
             if (validValues.Any())
             {
                 // 返回平均值
@@ -1354,7 +1598,7 @@ namespace WorkPartner.Utils
                 Console.WriteLine($"  从其他文件获取到 {validValues.Count} 个有效值，平均值: {average:F2}");
                 return average;
             }
-            
+
             return null;
         }
 
@@ -1394,7 +1638,7 @@ namespace WorkPartner.Utils
                         if (!currentGValue.HasValue || Math.Abs(currentGValue.Value - calculatedGValue) > 0.001)
                         {
                             dataRow.Values[colIndex] = calculatedGValue;
-                            Console.WriteLine($"✅ 修正第{rowIndex}行{columnName}列累计变化量: {calculatedGValue:F2} (G{rowIndex-1}:{previousGValue:F2} + D{rowIndex}:{currentDValue:F2})");
+                            Console.WriteLine($"✅ 修正第{rowIndex}行{columnName}列累计变化量: {calculatedGValue:F2} (G{rowIndex - 1}:{previousGValue:F2} + D{rowIndex}:{currentDValue:F2})");
                         }
                     }
                 }
@@ -1425,19 +1669,19 @@ namespace WorkPartner.Utils
         {
             // 查找指定行号的DataRow
             var dataRow = currentFile.DataRows.FirstOrDefault(r => r.RowIndex == rowIndex);
-            
+
             if (dataRow == null)
             {
                 Console.WriteLine($"    ⚠️ 在文件 {currentFile.FileName} 中未找到第{rowIndex}行对应的DataRow");
                 return null;
             }
-            
+
             if (colIndex >= dataRow.Values.Count)
             {
                 Console.WriteLine($"    ⚠️ 第{rowIndex}行{GetColumnName(colIndex)}列索引超出范围 (列数: {dataRow.Values.Count})");
                 return null;
             }
-            
+
             var value = dataRow.Values[colIndex];
             if (value.HasValue)
             {
@@ -2328,30 +2572,45 @@ namespace WorkPartner.Utils
             var processings = 0;
             var cacheHits = 0;
             var cacheMisses = 0;
+            var totalTimePoints = period.MissingTimes.Count;
+            var totalDataRows = period.MissingDataRows.Count;
+            var lastProgressTime = DateTime.Now;
 
-            // 按时间顺序处理每个缺失时间点
+            Console.WriteLine($"  📅 处理时间段: {period.StartTime:yyyy-MM-dd HH:mm} 到 {period.EndTime:yyyy-MM-dd HH:mm}, 共 {totalTimePoints} 个时间点, {totalDataRows} 个数据行");
+
+            // 按时间顺序处理，确保前面的数据补充能影响后面的计算
             for (int timeIndex = 0; timeIndex < period.MissingTimes.Count; timeIndex++)
             {
                 var missingTime = period.MissingTimes[timeIndex];
-                
+                var currentTime = DateTime.Now;
+
+                // 每处理5个时间点或每20秒显示一次进度
+                if ((timeIndex + 1) % 5 == 0 || (currentTime - lastProgressTime).TotalSeconds >= 20)
+                {
+                    var timeProgress = (double)(timeIndex + 1) / totalTimePoints * 100;
+                    Console.WriteLine($"    ⏰ 时间点进度: {timeIndex + 1}/{totalTimePoints} ({timeProgress:F1}%) - 当前处理: {missingTime:yyyy-MM-dd HH:mm}");
+                    lastProgressTime = currentTime;
+                }
+
+                // 找到当前时间点的文件
+                var targetFile = files.FirstOrDefault(f =>
+                    f.Date.Date == missingTime.Date && f.Hour == missingTime.Hour);
+
+                if (targetFile == null) continue;
+
+                // 处理当前时间点的所有数据行
                 foreach (var dataRowName in period.MissingDataRows)
                 {
-                    // 找到数据行
-                    var targetFile = files.FirstOrDefault(f => 
-                        f.Date.Date == missingTime.Date && f.Hour == missingTime.Hour);
-                    
-                    if (targetFile == null) continue;
-                    
                     var dataRow = targetFile.DataRows.FirstOrDefault(r => r.Name == dataRowName);
                     if (dataRow == null) continue;
-                    
-                    // 处理数据行中的每个缺失值
-                    for (int valueIndex = 0; valueIndex < dataRow.Values.Count; valueIndex++)
+
+                    // 处理数据行中的每个缺失值（只处理前一半的列）
+                    for (int valueIndex = 0; valueIndex < dataRow.Values.Count / 2; valueIndex++)
                     {
                         if (dataRow.Values[valueIndex].HasValue) continue; // 跳过已有值
-                        
+
                         var cacheKey = $"missing_period_{dataRowName}_{valueIndex}_{missingTime:yyyyMMddHH}";
-                        
+
                         if (cache != null)
                         {
                             var cachedValue = cache.Get<double?>(cacheKey);
@@ -2362,11 +2621,15 @@ namespace WorkPartner.Utils
                                 continue;
                             }
                         }
-                        
+
                         // 获取对应列的前后有效值
                         var (previousValue, nextValue) = GetNearestValuesForTimePoint(
                             files, dataRowName, missingTime, valueIndex);
-                        
+
+                        // 获取上一期的数据（使用最新的补充数据）
+                        var cumulativeColumnIndex = valueIndex + (dataRow.Values.Count / 2);
+                        var previousPeriodValue = GetPreviousPeriodData(files, dataRowName, missingTime, cumulativeColumnIndex);
+
                         if (previousValue.HasValue && nextValue.HasValue)
                         {
                             var missingPoint = new MissingDataPoint
@@ -2378,12 +2641,23 @@ namespace WorkPartner.Utils
                                 NextValue = nextValue,
                                 BaseValue = (previousValue.Value + nextValue.Value) / 2
                             };
-                            
+
                             var adjustedValue = CalculateAdjustedValueForMissingPoint(missingPoint, period, config);
-                            
+
                             // 应用调整后的值
                             dataRow.Values[valueIndex] = adjustedValue;
-                            
+
+                            // 计算累计变化量（如果有上一期数据）
+                            if (previousPeriodValue.HasValue)
+                            {
+                                if (cumulativeColumnIndex < dataRow.Values.Count)
+                                {
+                                    var newCumulativeValue = previousPeriodValue.Value + adjustedValue;
+                                    dataRow.Values[cumulativeColumnIndex] = newCumulativeValue;
+                                    //Console.WriteLine($"    📊 更新累计值: {dataRowName} 第{cumulativeColumnIndex + 1}列 = {previousPeriodValue:F2} + {adjustedValue:F2} = {newCumulativeValue:F2}");
+                                }
+                            }
+
                             // 缓存结果
                             cache?.Set(cacheKey, adjustedValue);
                             processings++;
@@ -2395,7 +2669,8 @@ namespace WorkPartner.Utils
                     }
                 }
             }
-            
+
+            Console.WriteLine($"    ✅ 时间段处理完成: 补充了 {processings} 个缺失值, 缓存命中 {cacheHits} 次, 缓存未命中 {cacheMisses} 次");
             return (processings, cacheHits, cacheMisses);
         }
 
@@ -2548,46 +2823,295 @@ namespace WorkPartner.Utils
         /// 获取指定时间点对应列的前后有效值
         /// </summary>
         private static (double? PreviousValue, double? NextValue) GetNearestValuesForTimePoint(
-            List<ExcelFile> files, 
-            string dataRowName, 
+            List<ExcelFile> files,
+            string dataRowName,
             DateTime targetTime,
             int valueIndex)
         {
             // 找到目标时间在文件列表中的位置
-            var targetIndex = files.FindIndex(f => 
+            var targetIndex = files.FindIndex(f =>
                 f.Date.Date == targetTime.Date && f.Hour == targetTime.Hour);
-            
+
             if (targetIndex == -1) return (null, null);
-            
+
             // 向前搜索有效值（对应列）
             double? previousValue = null;
             for (int i = targetIndex - 1; i >= 0; i--)
             {
                 var file = files[i];
                 var dataRow = file.DataRows.FirstOrDefault(r => r.Name == dataRowName);
-                if (dataRow != null && valueIndex < dataRow.Values.Count && 
+                if (dataRow != null && valueIndex < dataRow.Values.Count &&
                     dataRow.Values[valueIndex].HasValue)
                 {
                     previousValue = dataRow.Values[valueIndex].Value;
                     break;
                 }
             }
-            
+
             // 向后搜索有效值（对应列）
             double? nextValue = null;
             for (int i = targetIndex + 1; i < files.Count; i++)
             {
                 var file = files[i];
                 var dataRow = file.DataRows.FirstOrDefault(r => r.Name == dataRowName);
-                if (dataRow != null && valueIndex < dataRow.Values.Count && 
+                if (dataRow != null && valueIndex < dataRow.Values.Count &&
                     dataRow.Values[valueIndex].HasValue)
                 {
                     nextValue = dataRow.Values[valueIndex].Value;
                     break;
                 }
             }
-            
+
             return (previousValue, nextValue);
         }
+
+        /// <summary>
+        /// 比较原始目录和已处理目录中文件的数值差异
+        /// 只比较原始文件每行有值的数据
+        /// </summary>
+        /// <param name="originalDirectory">原始文件目录路径</param>
+        /// <param name="processedDirectory">已处理文件目录路径</param>
+        /// <param name="config">配置参数</param>
+        /// <returns>比较结果统计</returns>
+        public static ComparisonResult CompareOriginalAndProcessedFiles(string originalDirectory, string processedDirectory, DataProcessorConfig? config = null)
+        {
+            config ??= DataProcessorConfig.Default;
+
+            Console.WriteLine("🔍 开始比较原始文件和已处理文件的数值差异...");
+            Console.WriteLine($"📁 原始目录: {originalDirectory}");
+            Console.WriteLine($"📁 已处理目录: {processedDirectory}");
+
+            var result = new ComparisonResult();
+            var excelService = new ExcelService();
+
+            try
+            {
+                // 获取原始目录中的文件
+                var originalFiles = Directory.GetFiles(originalDirectory, "*.xls")
+                    .Where(f => !f.Contains("processed")) // 排除processed子目录
+                    .OrderBy(f => Path.GetFileName(f))
+                    .ToList();
+
+                Console.WriteLine($"📊 原始目录找到 {originalFiles.Count} 个.xls文件");
+
+                foreach (var originalFilePath in originalFiles)
+                {
+                    var fileName = Path.GetFileName(originalFilePath);
+                    var processedFilePath = Path.Combine(processedDirectory, fileName);
+
+                    // 检查对应的已处理文件是否存在
+                    if (!File.Exists(processedFilePath))
+                    {
+                        Console.WriteLine($"⚠️ 未找到对应的已处理文件: {fileName}");
+                        result.MissingProcessedFiles.Add(fileName);
+                        continue;
+                    }
+
+                    try
+                    {
+                        // 加载原始文件和已处理文件
+                        var originalFile = excelService.ReadExcelFile(originalFilePath);
+                        var processedFile = excelService.ReadExcelFile(processedFilePath);
+
+                        if (originalFile == null || processedFile == null)
+                        {
+                            Console.WriteLine($"❌ 文件加载失败: {fileName}");
+                            result.FailedComparisons.Add(fileName);
+                            continue;
+                        }
+
+                        // 比较文件内容
+                        var fileComparison = CompareFileContent(originalFile, processedFile, fileName, config);
+                        result.FileComparisons.Add(fileComparison);
+
+                        // 累计统计
+                        result.TotalOriginalValues += fileComparison.OriginalValuesCount;
+                        result.TotalProcessedValues += fileComparison.ProcessedValuesCount;
+                        result.TotalDifferences += fileComparison.DifferencesCount;
+                        result.TotalSignificantDifferences += fileComparison.SignificantDifferencesCount;
+
+                        Console.WriteLine($"✅ 完成比较: {fileName} - 差异: {fileComparison.DifferencesCount}/{fileComparison.OriginalValuesCount}");
+
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"❌ 比较文件失败 {fileName}: {ex.Message}");
+                        result.FailedComparisons.Add(fileName);
+                    }
+                }
+
+                // 输出总结
+                Console.WriteLine($"\\n📊 比较完成总结:");
+                Console.WriteLine($"   - 原始文件总数: {originalFiles.Count}");
+                Console.WriteLine($"   - 成功比较文件数: {result.FileComparisons.Count}");
+                Console.WriteLine($"   - 缺失已处理文件数: {result.MissingProcessedFiles.Count}");
+                Console.WriteLine($"   - 比较失败文件数: {result.FailedComparisons.Count}");
+                Console.WriteLine($"   - 原始数据值总数: {result.TotalOriginalValues}");
+                Console.WriteLine($"   - 已处理数据值总数: {result.TotalProcessedValues}");
+                Console.WriteLine($"   - 数值差异总数: {result.TotalDifferences}");
+                Console.WriteLine($"   - 显著差异总数: {result.TotalSignificantDifferences}");
+
+                if (result.TotalOriginalValues > 0)
+                {
+                    var differencePercentage = (double)result.TotalDifferences / result.TotalOriginalValues * 100;
+                    var significantDifferencePercentage = (double)result.TotalSignificantDifferences / result.TotalOriginalValues * 100;
+                    Console.WriteLine($"   - 差异率: {differencePercentage:F2}%");
+                    Console.WriteLine($"   - 显著差异率: {significantDifferencePercentage:F2}%");
+                }
+
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"❌ 比较过程发生错误: {ex.Message}");
+                result.HasError = true;
+                result.ErrorMessage = ex.Message;
+            }
+
+            return result;
+        }
+
+        /// <summary>
+        /// 比较单个文件的内容
+        /// </summary>
+        private static FileComparisonResult CompareFileContent(ExcelFile originalFile, ExcelFile processedFile, string fileName, DataProcessorConfig config)
+        {
+            var result = new FileComparisonResult
+            {
+                FileName = fileName,
+                OriginalDate = originalFile.Date,
+                ProcessedDate = processedFile.Date
+            };
+
+            // 按行名匹配数据行
+            var originalRows = originalFile.DataRows.ToDictionary(r => r.Name, r => r);
+            var processedRows = processedFile.DataRows.ToDictionary(r => r.Name, r => r);
+
+            foreach (var originalRow in originalFile.DataRows)
+            {
+                if (!processedRows.ContainsKey(originalRow.Name))
+                {
+                    result.MissingProcessedRows.Add(originalRow.Name);
+                    continue;
+                }
+
+                var processedRow = processedRows[originalRow.Name];
+                var rowComparison = CompareRowContent(originalRow, processedRow, config);
+                result.RowComparisons.Add(rowComparison);
+
+                // 累计统计
+                result.OriginalValuesCount += rowComparison.OriginalValuesCount;
+                result.ProcessedValuesCount += rowComparison.ProcessedValuesCount;
+                result.DifferencesCount += rowComparison.DifferencesCount;
+                result.SignificantDifferencesCount += rowComparison.SignificantDifferencesCount;
+            }
+
+            return result;
+        }
+
+        /// <summary>
+        /// 比较单个数据行的内容
+        /// </summary>
+        private static RowComparisonResult CompareRowContent(DataRow originalRow, DataRow processedRow, DataProcessorConfig config)
+        {
+            var result = new RowComparisonResult
+            {
+                RowName = originalRow.Name
+            };
+
+            // 比较每一列的值
+            var maxColumns = Math.Max(originalRow.Values.Count, processedRow.Values.Count);
+
+            for (int i = 0; i < maxColumns; i++)
+            {
+                var originalValue = i < originalRow.Values.Count ? originalRow.Values[i] : null;
+                var processedValue = i < processedRow.Values.Count ? processedRow.Values[i] : null;
+
+                // 只比较原始文件有值的数据
+                if (originalValue.HasValue)
+                {
+                    result.OriginalValuesCount++;
+
+                    if (processedValue.HasValue)
+                    {
+                        result.ProcessedValuesCount++;
+
+                        // 计算差异
+                        var difference = Math.Abs(processedValue.Value - originalValue.Value);
+                        var isSignificant = difference > config.ColumnValidationTolerance;
+
+                        if (difference > 0)
+                        {
+                            result.DifferencesCount++;
+
+                            if (isSignificant)
+                            {
+                                result.SignificantDifferencesCount++;
+                            }
+
+                            // 记录列差异详情
+                            result.ColumnDifferences.Add(new ColumnDifference
+                            {
+                                ColumnIndex = i,
+                                OriginalValue = originalValue.Value,
+                                ProcessedValue = processedValue.Value,
+                                Difference = difference,
+                                IsSignificant = isSignificant
+                            });
+                        }
+                    }
+                    else
+                    {
+                        result.MissingProcessedValues++;
+                    }
+                }
+            }
+
+            return result;
+        }
+
+        /// <summary>
+        /// 获取指定数据行名称的上一期数据
+        /// </summary>
+        /// <param name="files">文件列表</param>
+        /// <param name="dataRowName">数据行名称</param>
+        /// <param name="currentTime">当前时间</param>
+        /// <param name="valueIndex">列索引</param>
+        /// <returns>上一期数据，如果没有找到则返回null</returns>
+        private static double? GetPreviousPeriodData(List<ExcelFile> files, string dataRowName, DateTime currentTime, int valueIndex)
+        {
+            try
+            {
+                // 按时间顺序排序文件
+                var sortedFiles = files.OrderBy(f => f.Date).ThenBy(f => f.Hour).ToList();
+
+                // 找到当前时间在文件列表中的位置
+                var currentIndex = sortedFiles.FindIndex(f =>
+                    f.Date.Date == currentTime.Date && f.Hour == currentTime.Hour);
+
+                if (currentIndex <= 0) return null; // 第一个文件或未找到当前时间
+
+                // 向前搜索上一期的数据
+                for (int i = currentIndex - 1; i >= 0; i--)
+                {
+                    var previousFile = sortedFiles[i];
+                    var dataRow = previousFile.DataRows.FirstOrDefault(r => r.Name == dataRowName);
+                    
+                    if (dataRow != null && valueIndex < dataRow.Values.Count && dataRow.Values[valueIndex].HasValue)
+                    {
+                        var previousValue = dataRow.Values[valueIndex].Value;
+                        //Console.WriteLine($"    📊 找到上一期数据: {dataRowName} 在 {previousFile.Date:yyyy-MM-dd} {previousFile.Hour:D2}:00, 第{valueIndex + 1}列值: {previousValue:F2}");
+                        return previousValue;
+                    }
+                }
+
+                //Console.WriteLine($"    ⚠️ 未找到 {dataRowName} 的上一期数据");
+                return null;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"    ❌ 获取上一期数据失败: {ex.Message}");
+                return null;
+            }
+        }
     }
-} 
+}

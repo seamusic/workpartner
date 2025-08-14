@@ -19,12 +19,27 @@ namespace WorkPartner.Models
         public int RandomSeed { get; set; } = 42;
         public double TimeFactorWeight { get; set; } = 1.0;
         public double MinimumAdjustment { get; set; } = 0.001;
+        
+        /// <summary>
+        /// 第4、5、6列验证时的误差容忍度
+        /// </summary>
+        public double ColumnValidationTolerance { get; set; } = 0.01; // 1%
+
+        /// <summary>
+        /// 累计值调整阈值，当变化量超过此值时触发累计值调整
+        /// </summary>
+        public double CumulativeAdjustmentThreshold { get; set; } = 1.0; // 1.0
+
+        /// <summary>
+        /// 累计值调整时的误差容忍度
+        /// </summary>
+        public double CumulativeAdjustmentTolerance { get; set; } = 0.01; // 1%
 
         // 性能优化配置
         public bool EnableCaching { get; set; } = true;
         public int MaxCacheSize { get; set; } = 10000;
         public int CacheExpirationMinutes { get; set; } = 30;
-        public bool EnableBatchProcessing { get; set; } = true;
+        public bool EnableBatchProcessing { get; set; } = false;
         public int BatchSize { get; set; } = 100;
         public bool EnablePerformanceMonitoring { get; set; } = true;
         public bool EnableDetailedLogging { get; set; } = true;
@@ -40,6 +55,9 @@ namespace WorkPartner.Models
             RandomSeed = 42,
             TimeFactorWeight = 1.0,
             MinimumAdjustment = 0.001,
+            ColumnValidationTolerance = 0.01,
+            CumulativeAdjustmentThreshold = 1.0,
+            CumulativeAdjustmentTolerance = 0.01,
             BatchSize = 50, // 减小批次大小以提高响应性
             EnableCaching = false, // 默认禁用缓存，避免性能下降
             CacheExpirationMinutes = 30,
@@ -471,5 +489,63 @@ namespace WorkPartner.Models
         /// 平均完整性百分比
         /// </summary>
         public double AverageCompleteness { get; set; }
+    }
+    
+    /// <summary>
+    /// 列差异详情
+    /// </summary>
+    public class ColumnDifference
+    {
+        public int ColumnIndex { get; set; }
+        public double OriginalValue { get; set; }
+        public double ProcessedValue { get; set; }
+        public double Difference { get; set; }
+        public bool IsSignificant { get; set; }
+    }
+    
+    /// <summary>
+    /// 行比较结果
+    /// </summary>
+    public class RowComparisonResult
+    {
+        public string RowName { get; set; } = string.Empty;
+        public int OriginalValuesCount { get; set; }
+        public int ProcessedValuesCount { get; set; }
+        public int DifferencesCount { get; set; }
+        public int SignificantDifferencesCount { get; set; }
+        public int MissingProcessedValues { get; set; }
+        public List<ColumnDifference> ColumnDifferences { get; set; } = new List<ColumnDifference>();
+    }
+    
+    /// <summary>
+    /// 文件比较结果
+    /// </summary>
+    public class FileComparisonResult
+    {
+        public string FileName { get; set; } = string.Empty;
+        public DateTime OriginalDate { get; set; }
+        public DateTime ProcessedDate { get; set; }
+        public int OriginalValuesCount { get; set; }
+        public int ProcessedValuesCount { get; set; }
+        public int DifferencesCount { get; set; }
+        public int SignificantDifferencesCount { get; set; }
+        public List<string> MissingProcessedRows { get; set; } = new List<string>();
+        public List<RowComparisonResult> RowComparisons { get; set; } = new List<RowComparisonResult>();
+    }
+    
+    /// <summary>
+    /// 整体比较结果
+    /// </summary>
+    public class ComparisonResult
+    {
+        public bool HasError { get; set; }
+        public string ErrorMessage { get; set; } = string.Empty;
+        public int TotalOriginalValues { get; set; }
+        public int TotalProcessedValues { get; set; }
+        public int TotalDifferences { get; set; }
+        public int TotalSignificantDifferences { get; set; }
+        public List<string> MissingProcessedFiles { get; set; } = new List<string>();
+        public List<string> FailedComparisons { get; set; } = new List<string>();
+        public List<FileComparisonResult> FileComparisons { get; set; } = new List<FileComparisonResult>();
     }
 }

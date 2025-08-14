@@ -27,28 +27,8 @@ namespace WorkPartner
                 using var mainOperation = Logger.StartOperation("主程序执行");
                 ExceptionHandler.ClearErrorStatistics();
 
-                //// 检查Excel文件第185行数据
-                //Console.WriteLine("🔍 检查Excel文件第185行数据...");
-                //CheckExcelRow185Data();
-
-                //// 测试第185行补数逻辑
-                //Console.WriteLine("\n🧪 测试第185行补数逻辑...");
-                //TestRow185SupplementLogic();
-
-                //// 测试通用行缺失数据检查功能
-                //Console.WriteLine("\n🔍 测试通用行缺失数据检查功能...");
-                //TestGeneralRowMissingDataCheck();
-
-                //// 直接测试DataProcessor通用行缺失数据检查功能
-                //Console.WriteLine("\n🧪 直接测试DataProcessor通用行缺失数据检查功能...");
-                //TestDataProcessorGeneralRowCheck();
-
-                //// 检查第200行补数逻辑问题
-                //Console.WriteLine("\n🔍 检查第200行补数逻辑问题...");
-                //CheckRow200SupplementLogic();
-
                 // 解析命令行参数
-                args = new[] { "E:\\workspace\\gmdi\\tools\\WorkPartner\\excel" };
+                //args = new[] { "E:\\workspace\\gmdi\\tools\\WorkPartner\\excel" };
                 var arguments = ParseCommandLineArguments(args);
                 if (arguments == null)
                 {
@@ -116,16 +96,59 @@ namespace WorkPartner
                 Console.WriteLine("📊 处理缺失数据...");
                 var allFilesForProcessing = DataProcessor.GetAllFilesForProcessing(filesWithData, supplementFiles, arguments.OutputPath);
                 var processedFiles = DataProcessor.ProcessMissingData(allFilesForProcessing);
-                
+
+                // 3.3 第4、5、6列验证和重新计算 - 确保数据符合"1. 基本逻辑重构"要求
+                Console.WriteLine("🔍 验证第4、5、6列数据是否符合基本逻辑重构要求...");
+                var validatedFiles = DataProcessor.ValidateAndRecalculateColumns456(processedFiles);
+                //var validatedFiles = processedFiles;
+                Console.WriteLine($"✅ 第4、5、6列验证和重新计算完成");
+                                
                 // 保存处理后的数据到Excel文件（包含A2列更新）
                 Console.WriteLine("💾 保存处理后的数据并更新A2列...");
-                await SaveProcessedFiles(processedFiles, arguments.OutputPath);
+                await SaveProcessedFiles(validatedFiles, arguments.OutputPath);
+                
+                // 3.4 原始文件与已处理文件比较 - 检查数据处理前后的差异（在保存之后进行比较）
+                Console.WriteLine("🔍 比较原始文件与修正后文件的数值差异...");
+                var originalDirectory = arguments.InputPath;
+                var processedDirectory = arguments.OutputPath;
+                
+                try
+                {
+                    var comparisonResult = DataProcessor.CompareOriginalAndProcessedFiles(originalDirectory, processedDirectory);
+                    
+                    if (comparisonResult.HasError)
+                    {
+                        Console.WriteLine($"⚠️ 文件比较过程发生错误: {comparisonResult.ErrorMessage}");
+                    }
+                    else
+                    {
+                        Console.WriteLine($"📊 文件比较完成:");
+                        Console.WriteLine($"   - 原始文件总数: {comparisonResult.FileComparisons.Count + comparisonResult.MissingProcessedFiles.Count}");
+                        Console.WriteLine($"   - 成功比较文件数: {comparisonResult.FileComparisons.Count}");
+                        Console.WriteLine($"   - 缺失已处理文件数: {comparisonResult.MissingProcessedFiles.Count}");
+                        Console.WriteLine($"   - 数值差异总数: {comparisonResult.TotalDifferences}");
+                        Console.WriteLine($"   - 显著差异总数: {comparisonResult.TotalSignificantDifferences}");
+                        
+                        if (comparisonResult.TotalOriginalValues > 0)
+                        {
+                            var differencePercentage = (double)comparisonResult.TotalDifferences / comparisonResult.TotalOriginalValues * 100;
+                            var significantDifferencePercentage = (double)comparisonResult.TotalSignificantDifferences / comparisonResult.TotalOriginalValues * 100;
+                            Console.WriteLine($"   - 差异率: {differencePercentage:F2}%");
+                            Console.WriteLine($"   - 显著差异率: {significantDifferencePercentage:F2}%");
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"⚠️ 文件比较功能执行失败: {ex.Message}");
+                    Logger.Warning($"文件比较功能执行失败: {ex.Message}");
+                }
                 
                 // 数据质量验证
-                var qualityReport = DataProcessor.ValidateDataQuality(processedFiles);
+                var qualityReport = DataProcessor.ValidateDataQuality(validatedFiles);
 
                 // 显示处理结果
-                DisplayProcessingResults(processedFiles, completenessResult, supplementFiles, qualityReport);
+                DisplayProcessingResults(validatedFiles, completenessResult, supplementFiles, qualityReport);
 
                 Console.WriteLine("\n✅ 阶段5数据处理逻辑完成！");
                 
