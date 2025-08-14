@@ -548,4 +548,117 @@ namespace WorkPartner.Models
         public List<string> FailedComparisons { get; set; } = new List<string>();
         public List<FileComparisonResult> FileComparisons { get; set; } = new List<FileComparisonResult>();
     }
+
+    /// <summary>
+    /// 大值数据信息
+    /// </summary>
+    public class LargeValueData
+    {
+        /// <summary>
+        /// 行索引
+        /// </summary>
+        public int RowIndex { get; set; }
+
+        /// <summary>
+        /// 行名称
+        /// </summary>
+        public string RowName { get; set; } = string.Empty;
+
+        /// <summary>
+        /// 列索引
+        /// </summary>
+        public int ColumnIndex { get; set; }
+
+        /// <summary>
+        /// 列名称（A, B, C, ...）
+        /// </summary>
+        public string ColumnName { get; set; } = string.Empty;
+
+        /// <summary>
+        /// 原始值
+        /// </summary>
+        public double OriginalValue { get; set; }
+
+        /// <summary>
+        /// 绝对值
+        /// </summary>
+        public double AbsoluteValue { get; set; }
+
+        /// <summary>
+        /// 超过阈值的部分
+        /// </summary>
+        public double ExceedsThreshold { get; set; }
+    }
+
+    /// <summary>
+    /// 文件大值检查结果
+    /// </summary>
+    public class FileLargeValueResult
+    {
+        /// <summary>
+        /// 文件名
+        /// </summary>
+        public string FileName { get; set; } = string.Empty;
+
+        /// <summary>
+        /// 文件路径
+        /// </summary>
+        public string FilePath { get; set; } = string.Empty;
+
+        /// <summary>
+        /// 大值数据列表
+        /// </summary>
+        public List<LargeValueData> LargeValues { get; set; } = new List<LargeValueData>();
+    }
+
+    /// <summary>
+    /// 大值检查结果
+    /// </summary>
+    public class LargeValueCheckResult
+    {
+        /// <summary>
+        /// 输出目录
+        /// </summary>
+        public string OutputDirectory { get; set; } = string.Empty;
+
+        /// <summary>
+        /// 阈值
+        /// </summary>
+        public double Threshold { get; set; }
+
+        /// <summary>
+        /// 检查时间
+        /// </summary>
+        public DateTime CheckTime { get; set; }
+
+        /// <summary>
+        /// 错误信息
+        /// </summary>
+        public string ErrorMessage { get; set; } = string.Empty;
+
+        /// <summary>
+        /// 检查的文件总数
+        /// </summary>
+        public int TotalFilesChecked { get; set; }
+
+        /// <summary>
+        /// 包含大值的文件数
+        /// </summary>
+        public int FilesWithLargeValues { get; set; }
+
+        /// <summary>
+        /// 大值数据总数
+        /// </summary>
+        public int TotalLargeValues { get; set; }
+
+        /// <summary>
+        /// 错误列表
+        /// </summary>
+        public List<string> Errors { get; set; } = new List<string>();
+
+        /// <summary>
+        /// 文件检查结果列表
+        /// </summary>
+        public List<FileLargeValueResult> FileResults { get; set; } = new List<FileLargeValueResult>();
+    }
 }

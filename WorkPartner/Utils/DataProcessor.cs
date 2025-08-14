@@ -2872,14 +2872,26 @@ namespace WorkPartner.Utils
         /// <param name="originalDirectory">原始文件目录路径</param>
         /// <param name="processedDirectory">已处理文件目录路径</param>
         /// <param name="config">配置参数</param>
+        /// <param name="showDetailedDifferences">是否显示详细的差异信息</param>
+        /// <param name="tolerance">数值比较容差，默认使用配置中的值</param>
+        /// <param name="maxDifferencesToShow">最大显示差异数量，默认显示所有</param>
         /// <returns>比较结果统计</returns>
-        public static ComparisonResult CompareOriginalAndProcessedFiles(string originalDirectory, string processedDirectory, DataProcessorConfig? config = null)
+        public static ComparisonResult CompareOriginalAndProcessedFiles(
+            string originalDirectory, 
+            string processedDirectory, 
+            DataProcessorConfig? config = null,
+            bool showDetailedDifferences = false,
+            double? tolerance = null,
+            int maxDifferencesToShow = -1)
         {
             config ??= DataProcessorConfig.Default;
+            var comparisonTolerance = tolerance ?? config.ColumnValidationTolerance;
 
             Console.WriteLine("🔍 开始比较原始文件和已处理文件的数值差异...");
             Console.WriteLine($"📁 原始目录: {originalDirectory}");
             Console.WriteLine($"📁 已处理目录: {processedDirectory}");
+            Console.WriteLine($"⚙️ 比较容差: {comparisonTolerance}");
+            Console.WriteLine($"📊 详细差异显示: {(showDetailedDifferences ? "启用" : "禁用")}");
 
             var result = new ComparisonResult();
             var excelService = new ExcelService();
@@ -2896,17 +2908,20 @@ namespace WorkPartner.Utils
 
                 foreach (var originalFilePath in originalFiles)
                 {
-                    var fileName = Path.GetFileName(originalFilePath);
-                    var processedFilePath = Path.Combine(processedDirectory, fileName);
-
-                    // 检查对应的已处理文件是否存在
-                    if (!File.Exists(processedFilePath))
+                    var originalFileName = Path.GetFileName(originalFilePath);
+                    
+                    // 尝试多种文件名匹配策略
+                    var processedFilePath = FindMatchingProcessedFile(originalFileName, processedDirectory);
+                    
+                    if (processedFilePath == null)
                     {
-                        Console.WriteLine($"⚠️ 未找到对应的已处理文件: {fileName}");
-                        result.MissingProcessedFiles.Add(fileName);
+                        Console.WriteLine($"⚠️ 未找到对应的已处理文件: {originalFileName}");
+                        result.MissingProcessedFiles.Add(originalFileName);
                         continue;
                     }
 
+                    var processedFileName = Path.GetFileName(processedFilePath);
+                    
                     try
                     {
                         // 加载原始文件和已处理文件
@@ -2915,13 +2930,13 @@ namespace WorkPartner.Utils
 
                         if (originalFile == null || processedFile == null)
                         {
-                            Console.WriteLine($"❌ 文件加载失败: {fileName}");
-                            result.FailedComparisons.Add(fileName);
+                            Console.WriteLine($"❌ 文件加载失败: {originalFileName}");
+                            result.FailedComparisons.Add(originalFileName);
                             continue;
                         }
 
                         // 比较文件内容
-                        var fileComparison = CompareFileContent(originalFile, processedFile, fileName, config);
+                        var fileComparison = CompareFileContent(originalFile, processedFile, originalFileName, config, comparisonTolerance, showDetailedDifferences, maxDifferencesToShow);
                         result.FileComparisons.Add(fileComparison);
 
                         // 累计统计
@@ -2930,34 +2945,19 @@ namespace WorkPartner.Utils
                         result.TotalDifferences += fileComparison.DifferencesCount;
                         result.TotalSignificantDifferences += fileComparison.SignificantDifferencesCount;
 
-                        Console.WriteLine($"✅ 完成比较: {fileName} - 差异: {fileComparison.DifferencesCount}/{fileComparison.OriginalValuesCount}");
+                        // 显示文件比较结果
+                        DisplayFileComparisonResult(fileComparison, originalFileName, processedFileName, showDetailedDifferences);
 
                     }
                     catch (Exception ex)
                     {
-                        Console.WriteLine($"❌ 比较文件失败 {fileName}: {ex.Message}");
-                        result.FailedComparisons.Add(fileName);
+                        Console.WriteLine($"❌ 比较文件失败 {originalFileName}: {ex.Message}");
+                        result.FailedComparisons.Add(originalFileName);
                     }
                 }
 
                 // 输出总结
-                Console.WriteLine($"\\n📊 比较完成总结:");
-                Console.WriteLine($"   - 原始文件总数: {originalFiles.Count}");
-                Console.WriteLine($"   - 成功比较文件数: {result.FileComparisons.Count}");
-                Console.WriteLine($"   - 缺失已处理文件数: {result.MissingProcessedFiles.Count}");
-                Console.WriteLine($"   - 比较失败文件数: {result.FailedComparisons.Count}");
-                Console.WriteLine($"   - 原始数据值总数: {result.TotalOriginalValues}");
-                Console.WriteLine($"   - 已处理数据值总数: {result.TotalProcessedValues}");
-                Console.WriteLine($"   - 数值差异总数: {result.TotalDifferences}");
-                Console.WriteLine($"   - 显著差异总数: {result.TotalSignificantDifferences}");
-
-                if (result.TotalOriginalValues > 0)
-                {
-                    var differencePercentage = (double)result.TotalDifferences / result.TotalOriginalValues * 100;
-                    var significantDifferencePercentage = (double)result.TotalSignificantDifferences / result.TotalOriginalValues * 100;
-                    Console.WriteLine($"   - 差异率: {differencePercentage:F2}%");
-                    Console.WriteLine($"   - 显著差异率: {significantDifferencePercentage:F2}%");
-                }
+                DisplayComparisonSummary(result, originalFiles.Count);
 
             }
             catch (Exception ex)
@@ -2971,9 +2971,170 @@ namespace WorkPartner.Utils
         }
 
         /// <summary>
+        /// 查找匹配的已处理文件，支持时间格式差异（如 8 变成 08）
+        /// </summary>
+        /// <param name="originalFileName">原始文件名</param>
+        /// <param name="processedDirectory">已处理文件目录</param>
+        /// <returns>匹配的已处理文件路径，如果未找到则返回null</returns>
+        private static string? FindMatchingProcessedFile(string originalFileName, string processedDirectory)
+        {
+            // 1. 直接匹配
+            var directMatch = Path.Combine(processedDirectory, originalFileName);
+            if (File.Exists(directMatch))
+            {
+                return directMatch;
+            }
+
+            // 2. 解析原始文件名
+            var parseResult = FileNameParser.ParseFileName(originalFileName);
+            if (parseResult?.IsValid != true)
+            {
+                return null;
+            }
+
+            // 3. 生成标准化的文件名进行匹配
+            var standardizedFileName = FileNameParser.GenerateFileName(parseResult.Date, parseResult.Hour, parseResult.ProjectName);
+            var standardizedMatch = Path.Combine(processedDirectory, standardizedFileName);
+            if (File.Exists(standardizedMatch))
+            {
+                Console.WriteLine($"✅ 找到匹配文件: {originalFileName} -> {standardizedFileName}");
+                return standardizedMatch;
+            }
+
+            // 4. 模糊匹配：尝试不同的时间格式
+            var possibleMatches = new List<string>();
+            
+            // 尝试单数字格式（如果原始是双数字）
+            if (parseResult.Hour < 10)
+            {
+                var singleDigitFileName = $"{parseResult.FormattedDate}-{parseResult.Hour}{parseResult.ProjectName}";
+                possibleMatches.Add(Path.Combine(processedDirectory, singleDigitFileName));
+            }
+            
+            // 尝试双数字格式（如果原始是单数字）
+            var doubleDigitFileName = $"{parseResult.FormattedDate}-{parseResult.FormattedHour}{parseResult.ProjectName}";
+            possibleMatches.Add(Path.Combine(processedDirectory, doubleDigitFileName));
+
+            // 检查可能的匹配
+            foreach (var possibleMatch in possibleMatches)
+            {
+                if (File.Exists(possibleMatch))
+                {
+                    var matchedFileName = Path.GetFileName(possibleMatch);
+                    Console.WriteLine($"✅ 模糊匹配成功: {originalFileName} -> {matchedFileName}");
+                    return possibleMatch;
+                }
+            }
+
+            return null;
+        }
+
+        /// <summary>
+        /// 显示单个文件的比较结果
+        /// </summary>
+        private static void DisplayFileComparisonResult(FileComparisonResult fileComparison, string originalFileName, string processedFileName, bool showDetailedDifferences)
+        {
+            var differencePercentage = fileComparison.OriginalValuesCount > 0 
+                ? (double)fileComparison.DifferencesCount / fileComparison.OriginalValuesCount * 100 
+                : 0;
+            
+            var significantDifferencePercentage = fileComparison.OriginalValuesCount > 0 
+                ? (double)fileComparison.SignificantDifferencesCount / fileComparison.OriginalValuesCount * 100 
+                : 0;
+
+            Console.WriteLine($"✅ 完成比较: {originalFileName} -> {processedFileName}");
+            Console.WriteLine($"   📊 差异统计: {fileComparison.DifferencesCount}/{fileComparison.OriginalValuesCount} ({differencePercentage:F2}%)");
+            Console.WriteLine($"   ⚠️ 显著差异: {fileComparison.SignificantDifferencesCount}/{fileComparison.OriginalValuesCount} ({significantDifferencePercentage:F2}%)");
+
+            if (showDetailedDifferences && fileComparison.DifferencesCount > 0)
+            {
+                Console.WriteLine($"   🔍 详细差异:");
+                foreach (var rowComparison in fileComparison.RowComparisons.Where(r => r.DifferencesCount > 0))
+                {
+                    Console.WriteLine($"      📋 {rowComparison.RowName}: {rowComparison.DifferencesCount} 个差异");
+                    
+                    foreach (var columnDiff in rowComparison.ColumnDifferences.Take(5)) // 限制显示数量
+                    {
+                        var diffType = columnDiff.IsSignificant ? "⚠️" : "📝";
+                        Console.WriteLine($"         {diffType} 列{columnDiff.ColumnIndex + 1}: {columnDiff.OriginalValue:F3} -> {columnDiff.ProcessedValue:F3} (差异: {columnDiff.Difference:F3})");
+                    }
+                    
+                    if (rowComparison.ColumnDifferences.Count > 5)
+                    {
+                        Console.WriteLine($"         ... 还有 {rowComparison.ColumnDifferences.Count - 5} 个差异");
+                    }
+                }
+            }
+        }
+
+        /// <summary>
+        /// 显示比较总结
+        /// </summary>
+        private static void DisplayComparisonSummary(ComparisonResult result, int totalOriginalFiles)
+        {
+            Console.WriteLine($"\n📊 比较完成总结:");
+            Console.WriteLine($"   - 原始文件总数: {totalOriginalFiles}");
+            Console.WriteLine($"   - 成功比较文件数: {result.FileComparisons.Count}");
+            Console.WriteLine($"   - 缺失已处理文件数: {result.MissingProcessedFiles.Count}");
+            Console.WriteLine($"   - 比较失败文件数: {result.FailedComparisons.Count}");
+            Console.WriteLine($"   - 原始数据值总数: {result.TotalOriginalValues}");
+            Console.WriteLine($"   - 已处理数据值总数: {result.TotalProcessedValues}");
+            Console.WriteLine($"   - 数值差异总数: {result.TotalDifferences}");
+            Console.WriteLine($"   - 显著差异总数: {result.TotalSignificantDifferences}");
+
+            if (result.TotalOriginalValues > 0)
+            {
+                var differencePercentage = (double)result.TotalDifferences / result.TotalOriginalValues * 100;
+                var significantDifferencePercentage = (double)result.TotalSignificantDifferences / result.TotalOriginalValues * 100;
+                Console.WriteLine($"   - 总体差异率: {differencePercentage:F2}%");
+                Console.WriteLine($"   - 总体显著差异率: {significantDifferencePercentage:F2}%");
+                
+                // 添加修改比例统计
+                var modifiedValuesCount = result.TotalDifferences;
+                var modificationPercentage = (double)modifiedValuesCount / result.TotalOriginalValues * 100;
+                Console.WriteLine($"   - 修改比例: {modificationPercentage:F2}% ({modifiedValuesCount}/{result.TotalOriginalValues})");
+            }
+
+            // 显示缺失文件详情
+            if (result.MissingProcessedFiles.Any())
+            {
+                Console.WriteLine($"\n⚠️ 缺失的已处理文件:");
+                foreach (var missingFile in result.MissingProcessedFiles.Take(10)) // 限制显示数量
+                {
+                    Console.WriteLine($"   - {missingFile}");
+                }
+                if (result.MissingProcessedFiles.Count > 10)
+                {
+                    Console.WriteLine($"   ... 还有 {result.MissingProcessedFiles.Count - 10} 个文件");
+                }
+            }
+
+            // 显示失败比较详情
+            if (result.FailedComparisons.Any())
+            {
+                Console.WriteLine($"\n❌ 比较失败的文件:");
+                foreach (var failedFile in result.FailedComparisons.Take(10)) // 限制显示数量
+                {
+                    Console.WriteLine($"   - {failedFile}");
+                }
+                if (result.FailedComparisons.Count > 10)
+                {
+                    Console.WriteLine($"   ... 还有 {result.FailedComparisons.Count - 10} 个文件");
+                }
+            }
+        }
+
+        /// <summary>
         /// 比较单个文件的内容
         /// </summary>
-        private static FileComparisonResult CompareFileContent(ExcelFile originalFile, ExcelFile processedFile, string fileName, DataProcessorConfig config)
+        private static FileComparisonResult CompareFileContent(
+            ExcelFile originalFile, 
+            ExcelFile processedFile, 
+            string fileName, 
+            DataProcessorConfig config,
+            double tolerance,
+            bool showDetailedDifferences,
+            int maxDifferencesToShow)
         {
             var result = new FileComparisonResult
             {
@@ -2995,7 +3156,7 @@ namespace WorkPartner.Utils
                 }
 
                 var processedRow = processedRows[originalRow.Name];
-                var rowComparison = CompareRowContent(originalRow, processedRow, config);
+                var rowComparison = CompareRowContent(originalRow, processedRow, tolerance, maxDifferencesToShow);
                 result.RowComparisons.Add(rowComparison);
 
                 // 累计统计
@@ -3011,7 +3172,7 @@ namespace WorkPartner.Utils
         /// <summary>
         /// 比较单个数据行的内容
         /// </summary>
-        private static RowComparisonResult CompareRowContent(DataRow originalRow, DataRow processedRow, DataProcessorConfig config)
+        private static RowComparisonResult CompareRowContent(DataRow originalRow, DataRow processedRow, double tolerance, int maxDifferencesToShow)
         {
             var result = new RowComparisonResult
             {
@@ -3037,7 +3198,7 @@ namespace WorkPartner.Utils
 
                         // 计算差异
                         var difference = Math.Abs(processedValue.Value - originalValue.Value);
-                        var isSignificant = difference > config.ColumnValidationTolerance;
+                        var isSignificant = difference > tolerance;
 
                         if (difference > 0)
                         {
@@ -3048,15 +3209,18 @@ namespace WorkPartner.Utils
                                 result.SignificantDifferencesCount++;
                             }
 
-                            // 记录列差异详情
-                            result.ColumnDifferences.Add(new ColumnDifference
+                            // 记录列差异详情（限制数量）
+                            if (maxDifferencesToShow == -1 || result.ColumnDifferences.Count < maxDifferencesToShow)
                             {
-                                ColumnIndex = i,
-                                OriginalValue = originalValue.Value,
-                                ProcessedValue = processedValue.Value,
-                                Difference = difference,
-                                IsSignificant = isSignificant
-                            });
+                                result.ColumnDifferences.Add(new ColumnDifference
+                                {
+                                    ColumnIndex = i,
+                                    OriginalValue = originalValue.Value,
+                                    ProcessedValue = processedValue.Value,
+                                    Difference = difference,
+                                    IsSignificant = isSignificant
+                                });
+                            }
                         }
                     }
                     else
@@ -3113,5 +3277,170 @@ namespace WorkPartner.Utils
                 return null;
             }
         }
+
+        /// <summary>
+        /// 检查输出结果目录中第7、8、9列绝对值超过4的数据
+        /// </summary>
+        /// <param name="outputDirectory">输出结果目录路径</param>
+        /// <param name="threshold">阈值，默认为4</param>
+        /// <returns>检查结果</returns>
+        public static LargeValueCheckResult CheckLargeValuesInOutputDirectory(string outputDirectory, double threshold = 4.0)
+        {
+            var result = new LargeValueCheckResult
+            {
+                OutputDirectory = outputDirectory,
+                Threshold = threshold,
+                CheckTime = DateTime.Now
+            };
+
+            Console.WriteLine($"🔍 开始检查输出目录中的大值数据...");
+            Console.WriteLine($"📁 输出目录: {outputDirectory}");
+            Console.WriteLine($"⚙️ 阈值: {threshold}");
+
+            try
+            {
+                if (!Directory.Exists(outputDirectory))
+                {
+                    result.ErrorMessage = $"输出目录不存在: {outputDirectory}";
+                    Console.WriteLine($"❌ {result.ErrorMessage}");
+                    return result;
+                }
+
+                // 扫描Excel文件
+                var excelFiles = Directory.GetFiles(outputDirectory, "*.xls")
+                    .Concat(Directory.GetFiles(outputDirectory, "*.xlsx"))
+                    .ToList();
+
+                if (!excelFiles.Any())
+                {
+                    result.ErrorMessage = "未找到任何Excel文件";
+                    Console.WriteLine($"❌ {result.ErrorMessage}");
+                    return result;
+                }
+
+                Console.WriteLine($"📊 找到 {excelFiles.Count} 个Excel文件");
+
+                var excelService = new ExcelService();
+                var totalLargeValues = 0;
+
+                foreach (var filePath in excelFiles)
+                {
+                    var fileName = Path.GetFileName(filePath);
+                    Console.WriteLine($"\n📄 检查文件: {fileName}");
+
+                    try
+                    {
+                        // 读取Excel文件
+                        var excelFile = excelService.ReadExcelFile(filePath);
+                        if (excelFile?.DataRows == null || !excelFile.DataRows.Any())
+                        {
+                            Console.WriteLine($"  ⚠️ 文件无数据或读取失败");
+                            continue;
+                        }
+
+                        var fileResult = new FileLargeValueResult
+                        {
+                            FileName = fileName,
+                            FilePath = filePath
+                        };
+
+                        // 检查每个数据行
+                        foreach (var dataRow in excelFile.DataRows)
+                        {
+                            if (dataRow.Values == null || dataRow.Values.Count < 6)
+                            {
+                                continue; // 跳过数据不足的行
+                            }
+
+                            // 检查第7、8、9列（索引6、7、8）
+                            for (int colIndex = 3; colIndex <= 5; colIndex++)
+                            {
+                                if (colIndex < dataRow.Values.Count && dataRow.Values[colIndex].HasValue)
+                                {
+                                    var value = dataRow.Values[colIndex].Value;
+                                    var absValue = Math.Abs(value);
+
+                                    if (absValue > threshold)
+                                    {
+                                        var largeValue = new LargeValueData
+                                        {
+                                            RowIndex = dataRow.RowIndex,
+                                            RowName = dataRow.Name,
+                                            ColumnIndex = colIndex,
+                                            ColumnName = GetColumnName(colIndex),
+                                            OriginalValue = value,
+                                            AbsoluteValue = absValue,
+                                            ExceedsThreshold = absValue - threshold
+                                        };
+
+                                        fileResult.LargeValues.Add(largeValue);
+                                        totalLargeValues++;
+                                    }
+                                }
+                            }
+                        }
+
+                        if (fileResult.LargeValues.Any())
+                        {
+                            result.FileResults.Add(fileResult);
+                            Console.WriteLine($"  ⚠️ 发现 {fileResult.LargeValues.Count} 个大值数据");
+                            
+                            // 显示前5个大值
+                            foreach (var largeValue in fileResult.LargeValues.Take(5))
+                            {
+                                Console.WriteLine($"    {largeValue.RowName} (第{largeValue.RowIndex}行, {largeValue.ColumnName}列): {largeValue.OriginalValue:F3}");
+                            }
+                            
+                            if (fileResult.LargeValues.Count > 5)
+                            {
+                                Console.WriteLine($"    ... 还有 {fileResult.LargeValues.Count - 5} 个");
+                            }
+                        }
+                        else
+                        {
+                            Console.WriteLine($"  ✅ 未发现超过阈值的数据");
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"  ❌ 处理文件失败: {ex.Message}");
+                        result.Errors.Add($"处理文件 {fileName} 失败: {ex.Message}");
+                    }
+                }
+
+                // 生成统计信息
+                result.TotalFilesChecked = excelFiles.Count;
+                result.TotalLargeValues = totalLargeValues;
+                result.FilesWithLargeValues = result.FileResults.Count;
+
+                Console.WriteLine($"\n📊 检查完成:");
+                Console.WriteLine($"   - 检查文件数: {result.TotalFilesChecked}");
+                Console.WriteLine($"   - 包含大值文件数: {result.FilesWithLargeValues}");
+                Console.WriteLine($"   - 大值数据总数: {result.TotalLargeValues}");
+
+                if (result.FileResults.Any())
+                {
+                    Console.WriteLine($"\n⚠️ 发现大值数据的文件:");
+                    foreach (var fileResult in result.FileResults)
+                    {
+                        Console.WriteLine($"  - {fileResult.FileName}: {fileResult.LargeValues.Count} 个");
+                    }
+                }
+                else
+                {
+                    Console.WriteLine($"\n✅ 所有文件都符合要求，未发现超过阈值 {threshold} 的数据");
+                }
+
+                return result;
+            }
+            catch (Exception ex)
+            {
+                result.ErrorMessage = $"检查过程中发生错误: {ex.Message}";
+                Console.WriteLine($"❌ {result.ErrorMessage}");
+                return result;
+            }
+        }
+
+
     }
 }

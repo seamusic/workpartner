@@ -36,6 +36,20 @@ namespace WorkPartner
                     return;
                 }
 
+                // 检查是否为比较模式
+                if (arguments.CompareMode)
+                {
+                    await RunCompareMode(arguments);
+                    return;
+                }
+
+                // 检查是否为大值检查模式
+                if (arguments.CheckLargeValues)
+                {
+                    await RunLargeValueCheckMode(arguments);
+                    return;
+                }
+
                 // 验证输入路径
                 if (!ValidateInputPath(arguments.InputPath))
                 {
@@ -114,7 +128,14 @@ namespace WorkPartner
                 
                 try
                 {
-                    var comparisonResult = DataProcessor.CompareOriginalAndProcessedFiles(originalDirectory, processedDirectory);
+                    // 使用增强的比较功能，支持详细差异显示和自定义容差
+                    var comparisonResult = DataProcessor.CompareOriginalAndProcessedFiles(
+                        originalDirectory, 
+                        processedDirectory,
+                        showDetailedDifferences: true,  // 启用详细差异显示
+                        tolerance: 0.001,               // 设置比较容差为0.001
+                        maxDifferencesToShow: 10        // 每个文件最多显示10个差异
+                    );
                     
                     if (comparisonResult.HasError)
                     {
@@ -122,20 +143,8 @@ namespace WorkPartner
                     }
                     else
                     {
-                        Console.WriteLine($"📊 文件比较完成:");
-                        Console.WriteLine($"   - 原始文件总数: {comparisonResult.FileComparisons.Count + comparisonResult.MissingProcessedFiles.Count}");
-                        Console.WriteLine($"   - 成功比较文件数: {comparisonResult.FileComparisons.Count}");
-                        Console.WriteLine($"   - 缺失已处理文件数: {comparisonResult.MissingProcessedFiles.Count}");
-                        Console.WriteLine($"   - 数值差异总数: {comparisonResult.TotalDifferences}");
-                        Console.WriteLine($"   - 显著差异总数: {comparisonResult.TotalSignificantDifferences}");
-                        
-                        if (comparisonResult.TotalOriginalValues > 0)
-                        {
-                            var differencePercentage = (double)comparisonResult.TotalDifferences / comparisonResult.TotalOriginalValues * 100;
-                            var significantDifferencePercentage = (double)comparisonResult.TotalSignificantDifferences / comparisonResult.TotalOriginalValues * 100;
-                            Console.WriteLine($"   - 差异率: {differencePercentage:F2}%");
-                            Console.WriteLine($"   - 显著差异率: {significantDifferencePercentage:F2}%");
-                        }
+                        // 比较结果已在方法内部显示，这里只显示简要总结
+                        Console.WriteLine($"✅ 文件比较分析完成");
                     }
                 }
                 catch (Exception ex)
@@ -201,6 +210,14 @@ namespace WorkPartner
             public string InputPath { get; set; } = string.Empty;
             public string OutputPath { get; set; } = string.Empty;
             public bool Verbose { get; set; } = false;
+            public bool CompareMode { get; set; } = false;
+            public string CompareOriginalPath { get; set; } = string.Empty;
+            public string CompareProcessedPath { get; set; } = string.Empty;
+            public bool ShowDetailedDifferences { get; set; } = false;
+            public double Tolerance { get; set; } = 0.001;
+            public int MaxDifferencesToShow { get; set; } = 10;
+            public bool CheckLargeValues { get; set; } = false;
+            public double LargeValueThreshold { get; set; } = 4.0;
         }
 
         // 解析命令行参数
@@ -235,12 +252,67 @@ namespace WorkPartner
                     case "--verbose":
                         arguments.Verbose = true;
                         break;
+                    case "-c":
+                    case "--compare":
+                        arguments.CompareMode = true;
+                        // 比较模式需要两个路径参数
+                        if (i + 2 < args.Length)
+                        {
+                            arguments.CompareOriginalPath = args[++i];
+                            arguments.CompareProcessedPath = args[++i];
+                        }
+                        else if (i + 1 < args.Length)
+                        {
+                            // 如果只有一个路径，假设是原始路径，输出路径使用默认值
+                            arguments.CompareOriginalPath = args[++i];
+                            arguments.CompareProcessedPath = Path.Combine(arguments.CompareOriginalPath, "processed");
+                        }
+                        break;
+                    case "--detailed":
+                        arguments.ShowDetailedDifferences = true;
+                        break;
+                    case "--tolerance":
+                        if (i + 1 < args.Length && double.TryParse(args[++i], out var tolerance))
+                        {
+                            arguments.Tolerance = tolerance;
+                        }
+                        break;
+                    case "--max-differences":
+                        if (i + 1 < args.Length && int.TryParse(args[++i], out var maxDiff))
+                        {
+                            arguments.MaxDifferencesToShow = maxDiff;
+                        }
+                        break;
+                    case "--check-large-values":
+                        arguments.CheckLargeValues = true;
+                        break;
+                    case "--large-value-threshold":
+                        if (i + 1 < args.Length && double.TryParse(args[++i], out var largeValueThreshold))
+                        {
+                            arguments.LargeValueThreshold = largeValueThreshold;
+                        }
+                        break;
                     case "-h":
                     case "--help":
                         return null;
                     default:
+                        // 检查是否是比较模式的简化语法：-v 原始目录 对比目录
+                        if (args[i] == "-v" && i + 2 < args.Length)
+                        {
+                            arguments.CompareMode = true;
+                            arguments.Verbose = true;
+                            arguments.ShowDetailedDifferences = true;
+                            arguments.CompareOriginalPath = args[++i];
+                            arguments.CompareProcessedPath = args[++i];
+                        }
+                        // 检查是否是大值检查模式：--check-large-values 目录路径
+                        else if (args[i] == "--check-large-values" && i + 1 < args.Length)
+                        {
+                            arguments.CheckLargeValues = true;
+                            arguments.InputPath = args[++i]; // 将下一个参数作为要检查的目录路径
+                        }
                         // 如果没有指定参数，第一个参数作为输入路径
-                        if (string.IsNullOrEmpty(arguments.InputPath))
+                        else if (string.IsNullOrEmpty(arguments.InputPath))
                         {
                             arguments.InputPath = args[i];
                         }
@@ -262,13 +334,25 @@ namespace WorkPartner
         {
             Console.WriteLine("使用方法:");
             Console.WriteLine("  WorkPartner.exe <输入目录> [选项]");
+            Console.WriteLine("  WorkPartner.exe -c <原始目录> <对比目录> [选项]");
+            Console.WriteLine("  WorkPartner.exe -v <原始目录> <对比目录>");
+            Console.WriteLine("  WorkPartner.exe --check-large-values <目录路径> [选项]");
             Console.WriteLine("");
             Console.WriteLine("参数:");
             Console.WriteLine("  <输入目录>              包含Excel文件的目录路径");
+            Console.WriteLine("  <原始目录>              原始Excel文件目录");
+            Console.WriteLine("  <对比目录>              已处理的Excel文件目录");
+            Console.WriteLine("  <目录路径>              要检查的Excel文件目录");
             Console.WriteLine("");
             Console.WriteLine("选项:");
             Console.WriteLine("  -o, --output <目录>     输出目录路径 (默认: <输入目录>/processed)");
             Console.WriteLine("  -v, --verbose           详细输出模式");
+            Console.WriteLine("  -c, --compare           文件比较模式");
+            Console.WriteLine("  --detailed              显示详细差异信息");
+            Console.WriteLine("  --tolerance <数值>      设置比较容差 (默认: 0.001)");
+            Console.WriteLine("  --max-differences <数量> 限制显示差异数量 (默认: 10)");
+            Console.WriteLine("  --check-large-values    大值数据检查模式");
+            Console.WriteLine("  --large-value-threshold <数值> 设置大值检查阈值 (默认: 4.0)");
             Console.WriteLine("  -h, --help              显示此帮助信息");
             Console.WriteLine("");
             Console.WriteLine("支持的文件格式:");
@@ -276,9 +360,20 @@ namespace WorkPartner
             Console.WriteLine("  ✅ .xls (Excel 97-2003)");
             Console.WriteLine("");
             Console.WriteLine("示例:");
-            Console.WriteLine("  WorkPartner.exe C:\\excel\\");
-            Console.WriteLine("  WorkPartner.exe ..\\excel\\");
-            Console.WriteLine("  WorkPartner.exe C:\\excel\\ -o C:\\output\\ -v");
+            Console.WriteLine("  数据处理模式:");
+            Console.WriteLine("    WorkPartner.exe C:\\excel\\");
+            Console.WriteLine("    WorkPartner.exe ..\\excel\\");
+            Console.WriteLine("    WorkPartner.exe C:\\excel\\ -o C:\\output\\ -v");
+            Console.WriteLine("");
+            Console.WriteLine("  文件比较模式:");
+            Console.WriteLine("    WorkPartner.exe -c C:\\original C:\\processed");
+            Console.WriteLine("    WorkPartner.exe -v C:\\original C:\\processed");
+            Console.WriteLine("    WorkPartner.exe -c C:\\original C:\\processed --detailed --tolerance 0.01");
+            Console.WriteLine("");
+            Console.WriteLine("  大值检查模式:");
+            Console.WriteLine("    WorkPartner.exe --check-large-values C:\\output");
+            Console.WriteLine("    WorkPartner.exe --check-large-values C:\\output --large-value-threshold 5.0");
+            Console.WriteLine("    WorkPartner.exe --check-large-values C:\\output --large-value-threshold 3.0 -v");
         }
 
         // 验证输入路径
@@ -1156,6 +1251,155 @@ namespace WorkPartner
             {
                 Console.WriteLine($"❌ DataProcessor处理失败: {ex.Message}");
                 Console.WriteLine($"   异常详情: {ex}");
+            }
+        }
+
+        /// <summary>
+        /// 运行大值检查模式
+        /// </summary>
+        /// <param name="arguments">命令行参数</param>
+        private static async Task RunLargeValueCheckMode(CommandLineArguments arguments)
+        {
+            Console.WriteLine("WorkPartner Excel大值数据检查工具");
+            Console.WriteLine("================================");
+
+            // 确定要检查的目录
+            string checkDirectory;
+            if (!string.IsNullOrEmpty(arguments.InputPath))
+            {
+                checkDirectory = arguments.InputPath;
+            }
+            else if (!string.IsNullOrEmpty(arguments.OutputPath))
+            {
+                checkDirectory = arguments.OutputPath;
+            }
+            else
+            {
+                Console.WriteLine("❌ 请指定要检查的目录路径");
+                Console.WriteLine("使用方法: WorkPartner.exe --check-large-values <目录路径> [--large-value-threshold <阈值>]");
+                return;
+            }
+
+            Console.WriteLine($"📁 检查目录: {checkDirectory}");
+            Console.WriteLine($"⚙️ 阈值: {arguments.LargeValueThreshold}");
+
+            try
+            {
+                // 执行大值检查
+                var checkResult = DataProcessor.CheckLargeValuesInOutputDirectory(checkDirectory, arguments.LargeValueThreshold);
+
+                if (!string.IsNullOrEmpty(checkResult.ErrorMessage))
+                {
+                    Console.WriteLine($"⚠️ 检查过程发生错误: {checkResult.ErrorMessage}");
+                }
+                else
+                {
+                    Console.WriteLine($"✅ 大值数据检查完成");
+                    
+                    // 显示详细结果
+                    if (arguments.Verbose && checkResult.FileResults.Any())
+                    {
+                        Console.WriteLine($"\n📊 详细检查结果:");
+                        foreach (var fileResult in checkResult.FileResults)
+                        {
+                            Console.WriteLine($"\n📄 文件: {fileResult.FileName}");
+                            Console.WriteLine($"   发现 {fileResult.LargeValues.Count} 个大值数据:");
+                            
+                            foreach (var largeValue in fileResult.LargeValues)
+                            {
+                                Console.WriteLine($"   - {largeValue.RowName} (第{largeValue.RowIndex}行, {largeValue.ColumnName}列): {largeValue.OriginalValue:F3} (绝对值: {largeValue.AbsoluteValue:F3})");
+                            }
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"❌ 大值检查功能执行失败: {ex.Message}");
+                Logger.Error($"大值检查功能执行失败: {ex.Message}", ex);
+            }
+        }
+
+        /// <summary>
+        /// 运行文件比较模式
+        /// </summary>
+        /// <param name="arguments">命令行参数</param>
+        private static async Task RunCompareMode(CommandLineArguments arguments)
+        {
+            Console.WriteLine("WorkPartner Excel文件比较工具");
+            Console.WriteLine("============================");
+
+            // 验证比较路径
+            if (string.IsNullOrEmpty(arguments.CompareOriginalPath))
+            {
+                Console.WriteLine("❌ 原始文件目录路径不能为空");
+                return;
+            }
+
+            if (string.IsNullOrEmpty(arguments.CompareProcessedPath))
+            {
+                Console.WriteLine("❌ 对比文件目录路径不能为空");
+                return;
+            }
+
+            if (!Directory.Exists(arguments.CompareOriginalPath))
+            {
+                Console.WriteLine($"❌ 原始文件目录不存在: {arguments.CompareOriginalPath}");
+                return;
+            }
+
+            if (!Directory.Exists(arguments.CompareProcessedPath))
+            {
+                Console.WriteLine($"❌ 对比文件目录不存在: {arguments.CompareProcessedPath}");
+                return;
+            }
+
+            Console.WriteLine($"📁 原始文件目录: {arguments.CompareOriginalPath}");
+            Console.WriteLine($"📁 对比文件目录: {arguments.CompareProcessedPath}");
+            Console.WriteLine($"⚙️ 比较容差: {arguments.Tolerance}");
+            Console.WriteLine($"📊 详细差异显示: {(arguments.ShowDetailedDifferences ? "启用" : "禁用")}");
+            Console.WriteLine($"🔢 最大差异显示数量: {arguments.MaxDifferencesToShow}");
+
+            try
+            {
+                // 执行文件比较
+                var comparisonResult = DataProcessor.CompareOriginalAndProcessedFiles(
+                    arguments.CompareOriginalPath,
+                    arguments.CompareProcessedPath,
+                    showDetailedDifferences: arguments.ShowDetailedDifferences,
+                    tolerance: arguments.Tolerance,
+                    maxDifferencesToShow: arguments.MaxDifferencesToShow
+                );
+
+                if (comparisonResult.HasError)
+                {
+                    Console.WriteLine($"⚠️ 文件比较过程发生错误: {comparisonResult.ErrorMessage}");
+                }
+                else
+                {
+                    Console.WriteLine($"✅ 文件比较分析完成");
+                    
+                    // 显示简要总结
+                    if (arguments.Verbose)
+                    {
+                        Console.WriteLine($"\n📊 比较结果总结:");
+                        Console.WriteLine($"   - 原始文件总数: {comparisonResult.FileComparisons.Count + comparisonResult.MissingProcessedFiles.Count}");
+                        Console.WriteLine($"   - 成功比较文件数: {comparisonResult.FileComparisons.Count}");
+                        Console.WriteLine($"   - 缺失对比文件数: {comparisonResult.MissingProcessedFiles.Count}");
+                        Console.WriteLine($"   - 比较失败文件数: {comparisonResult.FailedComparisons.Count}");
+                        
+                        if (comparisonResult.TotalOriginalValues > 0)
+                        {
+                            var modificationPercentage = (double)comparisonResult.TotalDifferences / comparisonResult.TotalOriginalValues * 100;
+                            Console.WriteLine($"   - 修改比例: {modificationPercentage:F2}% ({comparisonResult.TotalDifferences}/{comparisonResult.TotalOriginalValues})");
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"❌ 文件比较功能执行失败: {ex.Message}");
+                Logger.Error($"文件比较功能执行失败: {ex.Message}", ex);
             }
         }
 
