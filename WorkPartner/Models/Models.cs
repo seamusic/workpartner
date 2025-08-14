@@ -661,4 +661,142 @@ namespace WorkPartner.Models
         /// </summary>
         public List<FileLargeValueResult> FileResults { get; set; } = new List<FileLargeValueResult>();
     }
+
+    /// <summary>
+    /// 数据修正记录
+    /// </summary>
+    public class DataCorrection
+    {
+        /// <summary>
+        /// 数据行名称
+        /// </summary>
+        public string DataRowName { get; set; } = string.Empty;
+
+        /// <summary>
+        /// 列索引
+        /// </summary>
+        public int ColumnIndex { get; set; }
+
+        /// <summary>
+        /// 原始值
+        /// </summary>
+        public double OriginalValue { get; set; }
+
+        /// <summary>
+        /// 修正后的值
+        /// </summary>
+        public double CorrectedValue { get; set; }
+
+        /// <summary>
+        /// 修正的期数
+        /// </summary>
+        public int CorrectionPeriods { get; set; }
+
+        /// <summary>
+        /// 修正时间
+        /// </summary>
+        public DateTime CorrectionTime { get; set; }
+    }
+
+    /// <summary>
+    /// 文件修正结果
+    /// </summary>
+    public class FileCorrectionResult
+    {
+        /// <summary>
+        /// 文件名
+        /// </summary>
+        public string FileName { get; set; } = string.Empty;
+
+        /// <summary>
+        /// 文件路径
+        /// </summary>
+        public string FilePath { get; set; } = string.Empty;
+
+        /// <summary>
+        /// 是否有异常数据
+        /// </summary>
+        public bool HasAbnormalData { get; set; }
+
+        /// <summary>
+        /// 修正次数
+        /// </summary>
+        public int CorrectionsCount { get; set; }
+
+        /// <summary>
+        /// 修正记录列表
+        /// </summary>
+        public List<DataCorrection> Corrections { get; set; } = new List<DataCorrection>();
+    }
+
+    /// <summary>
+    /// 数据修正结果
+    /// </summary>
+    public class DataCorrectionResult
+    {
+        /// <summary>
+        /// 是否成功
+        /// </summary>
+        public bool IsSuccess { get; set; }
+
+        /// <summary>
+        /// 开始时间
+        /// </summary>
+        public DateTime StartTime { get; set; }
+
+        /// <summary>
+        /// 结束时间
+        /// </summary>
+        public DateTime EndTime { get; set; }
+
+        /// <summary>
+        /// 处理时间
+        /// </summary>
+        public TimeSpan ProcessingTime { get; set; }
+
+        /// <summary>
+        /// 原目录路径
+        /// </summary>
+        public string OriginalDirectory { get; set; } = string.Empty;
+
+        /// <summary>
+        /// 处理后目录路径
+        /// </summary>
+        public string ProcessedDirectory { get; set; } = string.Empty;
+
+        /// <summary>
+        /// 原目录文件数
+        /// </summary>
+        public int OriginalFilesCount { get; set; }
+
+        /// <summary>
+        /// 处理后目录文件数
+        /// </summary>
+        public int ProcessedFilesCount { get; set; }
+
+        /// <summary>
+        /// 补充文件数
+        /// </summary>
+        public int SupplementFilesCount { get; set; }
+
+        /// <summary>
+        /// 有异常数据的文件数
+        /// </summary>
+        public int FilesWithAbnormalData { get; set; }
+
+        /// <summary>
+        /// 总修正次数
+        /// </summary>
+        public int TotalCorrections { get; set; }
+
+        /// <summary>
+        /// 错误信息
+        /// </summary>
+        public string? ErrorMessage { get; set; }
+
+        /// <summary>
+        /// 文件修正结果列表
+        /// </summary>
+        public List<FileCorrectionResult> FileCorrections { get; set; } = new List<FileCorrectionResult>();
+    }
 }

@@ -3441,6 +3441,349 @@ namespace WorkPartner.Utils
             }
         }
 
+        /// <summary>
+        /// 重新修正已处理好的文件中的异常数据
+        /// </summary>
+        /// <param name="originalDirectory">原目录路径</param>
+        /// <param name="processedDirectory">处理后的目录路径</param>
+        /// <param name="config">配置参数</param>
+        /// <returns>修正结果</returns>
+        public static DataCorrectionResult ProcessDataCorrection(string originalDirectory, string processedDirectory, DataProcessorConfig? config = null)
+        {
+            config ??= DataProcessorConfig.Default;
+            
+            var result = new DataCorrectionResult
+            {
+                StartTime = DateTime.Now,
+                OriginalDirectory = originalDirectory,
+                ProcessedDirectory = processedDirectory
+            };
+
+            Console.WriteLine("🔧 开始重新修正已处理文件中的异常数据...");
+            Console.WriteLine($"📁 原目录: {originalDirectory}");
+            Console.WriteLine($"📁 处理后目录: {processedDirectory}");
+
+            try
+            {
+                // 第一步：读取原目录和处理后目录的文件
+                var originalFiles = ReadDirectoryFiles(originalDirectory);
+                var processedFiles = ReadDirectoryFiles(processedDirectory);
+
+                result.OriginalFilesCount = originalFiles.Count;
+                result.ProcessedFilesCount = processedFiles.Count;
+
+                Console.WriteLine($"📊 原目录文件数: {originalFiles.Count}");
+                Console.WriteLine($"📊 处理后目录文件数: {processedFiles.Count}");
+
+                // 第二步：识别新补充的数据（不在原目录中的文件）
+                var supplementFiles = IdentifySupplementFiles(originalFiles, processedFiles);
+                result.SupplementFilesCount = supplementFiles.Count;
+
+                Console.WriteLine($"📊 新补充文件数: {supplementFiles.Count}");
+
+                if (supplementFiles.Count == 0)
+                {
+                    Console.WriteLine("✅ 没有发现新补充的文件，无需修正");
+                    result.IsSuccess = true;
+                    return result;
+                }
+
+                // 第三步：检查异常数据并修正
+                var correctionResults = new List<FileCorrectionResult>();
+
+                foreach (var supplementFile in supplementFiles)
+                {
+                    Console.WriteLine($"🔍 检查补充文件: {supplementFile.FileName}");
+                    var fileCorrection = CheckAndCorrectFile(supplementFile, originalFiles, processedFiles, config);
+                    correctionResults.Add(fileCorrection);
+
+                    if (fileCorrection.HasAbnormalData)
+                    {
+                        result.FilesWithAbnormalData++;
+                        result.TotalCorrections += fileCorrection.CorrectionsCount;
+                    }
+                }
+
+                result.FileCorrections = correctionResults;
+                result.IsSuccess = true;
+
+                // 保存修正后的数据到文件
+                if (result.TotalCorrections > 0)
+                {
+                    Console.WriteLine($"💾 开始保存修正后的数据到文件...");
+                    var savedCount = SaveCorrectedFiles(processedFiles);
+                    Console.WriteLine($"💾 成功保存 {savedCount} 个修正后的文件");
+                }
+
+                Console.WriteLine($"✅ 数据修正完成");
+                Console.WriteLine($"📊 发现异常数据的文件数: {result.FilesWithAbnormalData}");
+                Console.WriteLine($"📊 总修正次数: {result.TotalCorrections}");
+
+                return result;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"❌ 数据修正过程中发生错误: {ex.Message}");
+                result.ErrorMessage = ex.Message;
+                result.IsSuccess = false;
+                return result;
+            }
+            finally
+            {
+                result.EndTime = DateTime.Now;
+                result.ProcessingTime = result.EndTime - result.StartTime;
+            }
+        }
+
+        /// <summary>
+        /// 读取目录下的所有Excel文件
+        /// </summary>
+        private static List<ExcelFile> ReadDirectoryFiles(string directory)
+        {
+            if (!Directory.Exists(directory))
+            {
+                throw new DirectoryNotFoundException($"目录不存在: {directory}");
+            }
+
+            var excelFiles = FileProcessor.ScanExcelFiles(directory);
+            var parsedFiles = FileProcessor.ParseAndSortFiles(excelFiles);
+            var filesWithData = FileProcessor.ReadExcelData(parsedFiles);
+
+            return filesWithData;
+        }
+
+        /// <summary>
+        /// 识别新补充的文件（不在原目录中的文件）
+        /// </summary>
+        private static List<ExcelFile> IdentifySupplementFiles(List<ExcelFile> originalFiles, List<ExcelFile> processedFiles)
+        {
+            var originalFileNames = originalFiles.Select(f => f.FileName).ToHashSet();
+            var supplementFiles = processedFiles.Where(f => !originalFileNames.Contains(f.FileName)).ToList();
+
+            return supplementFiles;
+        }
+
+        /// <summary>
+        /// 检查并修正单个文件中的异常数据
+        /// </summary>
+        private static FileCorrectionResult CheckAndCorrectFile(ExcelFile supplementFile, List<ExcelFile> originalFiles, List<ExcelFile> processedFiles, DataProcessorConfig config)
+        {
+            var result = new FileCorrectionResult
+            {
+                FileName = supplementFile.FileName,
+                FilePath = supplementFile.FilePath
+            };
+
+            var corrections = new List<DataCorrection>();
+
+            // 检查每个数据行的第7、8、9列（索引3、4、5）
+            foreach (var dataRow in supplementFile.DataRows)
+            {
+                for (int colIndex = 3; colIndex <= 5; colIndex++) // 第7、8、9列
+                {
+                    if (colIndex < dataRow.Values.Count && dataRow.Values[colIndex].HasValue)
+                    {
+                        var value = dataRow.Values[colIndex].Value;
+                        
+                        // 检查值是否超过4
+                        if (Math.Abs(value) > 4.0)
+                        {
+                            Console.WriteLine($"⚠️ 发现异常数据: {supplementFile.FileName} - {dataRow.Name} 第{colIndex + 1}列 = {value:F2}");
+                            
+                            // 进行修正
+                            var correction = CorrectAbnormalData(supplementFile, dataRow, colIndex, originalFiles, processedFiles, config);
+                            if (correction != null)
+                            {
+                                corrections.Add(correction);
+                                result.CorrectionsCount++;
+                            }
+                        }
+                    }
+                }
+            }
+
+            result.Corrections = corrections;
+            result.HasAbnormalData = corrections.Count > 0;
+
+            if (result.HasAbnormalData)
+            {
+                Console.WriteLine($"🔧 文件 {supplementFile.FileName} 修正了 {result.CorrectionsCount} 个异常数据");
+            }
+
+            return result;
+        }
+
+        /// <summary>
+        /// 修正异常数据
+        /// </summary>
+        private static DataCorrection? CorrectAbnormalData(ExcelFile supplementFile, DataRow dataRow, int colIndex, List<ExcelFile> originalFiles, List<ExcelFile> processedFiles, DataProcessorConfig config)
+        {
+            try
+            {
+                var originalValue = dataRow.Values[colIndex].Value;
+                Console.WriteLine($"🔧 开始修正: {dataRow.Name} 第{colIndex + 1}列 = {originalValue:F2}");
+
+                // 获取当前文件的时间信息
+                var currentTime = new DateTime(supplementFile.Date.Year, supplementFile.Date.Month, supplementFile.Date.Day, supplementFile.Hour, 0, 0);
+
+                // 往前5期开始处理
+                var correctionPeriods = 5;
+                // 为每个数据行和列组合生成不同的随机种子
+                var random = new Random(GetSeedForDataRowAndColumn(supplementFile.FileName, dataRow.Name, colIndex));
+
+                // 获取当前文件在已处理文件中的位置
+                var allProcessedFiles = processedFiles.OrderBy(f => f.Date).ThenBy(f => f.Hour).ToList();
+                var currentFileIndex = allProcessedFiles.FindIndex(f => f.FileName == supplementFile.FileName);
+
+                if (currentFileIndex == -1)
+                {
+                    Console.WriteLine($"❌ 无法找到文件 {supplementFile.FileName} 在处理后文件列表中的位置");
+                    return null;
+                }
+
+                // 往前5期开始处理
+                var startIndex = Math.Max(0, currentFileIndex - correctionPeriods + 1);
+                var endIndex = currentFileIndex;
+
+                Console.WriteLine($"📅 修正时间范围: 从第{startIndex + 1}期到第{endIndex + 1}期");
+
+                // 处理每一期
+                for (int periodIndex = startIndex; periodIndex <= endIndex; periodIndex++)
+                {
+                    var targetFile = allProcessedFiles[periodIndex];
+                    var targetDataRow = targetFile.DataRows.FirstOrDefault(r => r.Name == dataRow.Name);
+
+                    if (targetDataRow == null)
+                    {
+                        Console.WriteLine($"⚠️ 在文件 {targetFile.FileName} 中未找到数据行 {dataRow.Name}");
+                        continue;
+                    }
+
+                    // 生成本期变化量（第4、5、6列，索引3、4、5）
+                    var changeColIndex = colIndex - 3; // 变化量列索引
+                    if (changeColIndex >= 0 && changeColIndex < targetDataRow.Values.Count)
+                    {
+                        // 为每个期数生成不同的变化量
+                        var periodRandom = new Random(GetSeedForDataRowAndColumnAndPeriod(supplementFile.FileName, dataRow.Name, colIndex, periodIndex));
+                        var changeValue = GenerateChangeValue(periodRandom, -0.5, 0.5);
+                        targetDataRow.Values[changeColIndex] = changeValue;
+
+                        Console.WriteLine($"📊 第{periodIndex + 1}期 {targetFile.FileName} - {targetDataRow.Name} 第{changeColIndex + 1}列变化量 = {changeValue:F3}");
+
+                        // 计算累计变化量
+                        if (periodIndex > startIndex)
+                        {
+                            var previousFile = allProcessedFiles[periodIndex - 1];
+                            var previousDataRow = previousFile.DataRows.FirstOrDefault(r => r.Name == dataRow.Name);
+
+                            if (previousDataRow != null && previousDataRow.Values[colIndex].HasValue)
+                            {
+                                var previousCumulative = previousDataRow.Values[colIndex].Value;
+                                var newCumulative = previousCumulative + changeValue;
+                                targetDataRow.Values[colIndex] = newCumulative;
+
+                                Console.WriteLine($"📊 第{periodIndex + 1}期累计变化量 = {previousCumulative:F3} + {changeValue:F3} = {newCumulative:F3}");
+                            }
+                        }
+                        else
+                        {
+                            // 第一期，使用变化量作为累计值
+                            targetDataRow.Values[colIndex] = changeValue;
+                            Console.WriteLine($"📊 第{periodIndex + 1}期（首期）累计变化量 = {changeValue:F3}");
+                        }
+                    }
+                }
+
+                // 创建修正记录
+                var correction = new DataCorrection
+                {
+                    DataRowName = dataRow.Name,
+                    ColumnIndex = colIndex,
+                    OriginalValue = originalValue,
+                    CorrectedValue = dataRow.Values[colIndex].Value,
+                    CorrectionPeriods = correctionPeriods,
+                    CorrectionTime = DateTime.Now
+                };
+
+                Console.WriteLine($"✅ 修正完成: {dataRow.Name} 第{colIndex + 1}列 {originalValue:F2} → {correction.CorrectedValue:F2}");
+
+                return correction;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"❌ 修正异常数据失败: {ex.Message}");
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// 生成变化量
+        /// </summary>
+        private static double GenerateChangeValue(Random random, double minValue, double maxValue)
+        {
+            return random.NextDouble() * (maxValue - minValue) + minValue;
+        }
+
+        /// <summary>
+        /// 根据文件名生成随机种子
+        /// </summary>
+        private static int GetSeedForFile(string fileName)
+        {
+            return fileName.GetHashCode();
+        }
+
+        /// <summary>
+        /// 根据文件名、数据行名称和列索引生成随机种子
+        /// </summary>
+        private static int GetSeedForDataRowAndColumn(string fileName, string dataRowName, int colIndex)
+        {
+            var combinedString = $"{fileName}_{dataRowName}_{colIndex}";
+            return combinedString.GetHashCode();
+        }
+
+        /// <summary>
+        /// 根据文件名、数据行名称、列索引和期数生成随机种子
+        /// </summary>
+        private static int GetSeedForDataRowAndColumnAndPeriod(string fileName, string dataRowName, int colIndex, int periodIndex)
+        {
+            var combinedString = $"{fileName}_{dataRowName}_{colIndex}_{periodIndex}";
+            return combinedString.GetHashCode();
+        }
+
+        /// <summary>
+        /// 保存修正后的数据到文件
+        /// </summary>
+        /// <param name="processedFiles">已处理的文件列表</param>
+        /// <returns>成功保存的文件数量</returns>
+        private static int SaveCorrectedFiles(List<ExcelFile> processedFiles)
+        {
+            var savedCount = 0;
+            var excelService = new ExcelService();
+
+            foreach (var file in processedFiles)
+            {
+                try
+                {
+                    // 检查文件是否有修正数据
+                    var hasCorrections = file.DataRows.Any(row => 
+                        row.Values.Any(v => v.HasValue && Math.Abs(v.Value) <= 4.0 && v.Value != 0));
+
+                    if (hasCorrections)
+                    {
+                        // 保存修正后的数据到文件
+                        excelService.SaveExcelFile(file, file.FilePath);
+                        savedCount++;
+                        Console.WriteLine($"💾 已保存修正后的文件: {file.FileName}");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"❌ 保存文件失败 {file.FileName}: {ex.Message}");
+                }
+            }
+
+            return savedCount;
+        }
 
     }
 }
