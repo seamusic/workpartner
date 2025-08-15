@@ -21,6 +21,32 @@ namespace WorkPartner.Models
         public double MinimumAdjustment { get; set; } = 0.001;
         
         /// <summary>
+        /// 是否启用随机化/时间因子调整（关闭则使用纯均值填充）
+        /// </summary>
+        public bool EnableRandomizedAdjustment { get; set; } = false;
+
+        /// <summary>
+        /// 每个数据行中“变化列”的数量（用于从变化列到累计列的映射）。
+        /// 若未设置，则默认按 Values.Count / 2 进行推断。
+        /// </summary>
+        public int? ChangeColumnsPerRow { get; set; }
+
+        /// <summary>
+        /// 是否启用缺失时间段的并行处理（Period级并行）。
+        /// </summary>
+        public bool EnableParallelMissingPeriods { get; set; } = false;
+
+        /// <summary>
+        /// 并行处理的最大并行度。
+        /// </summary>
+        public int MaxDegreeOfParallelism { get; set; } = 0; // 0 表示使用系统默认
+
+        /// <summary>
+        /// 是否启用列维度并行（仅对变化列部分），默认关闭。
+        /// </summary>
+        public bool EnableParallelValueColumns { get; set; } = false;
+        
+        /// <summary>
         /// 第4、5、6列验证时的误差容忍度
         /// </summary>
         public double ColumnValidationTolerance { get; set; } = 0.01; // 1%
@@ -64,8 +90,30 @@ namespace WorkPartner.Models
             MaxCacheSize = 1000,
             EnableBatchProcessing = true,
             EnableDetailedLogging = false,
-            EnablePerformanceMonitoring = true
+            EnablePerformanceMonitoring = true,
+            EnableRandomizedAdjustment = false,
+            ChangeColumnsPerRow = null,
+            EnableParallelMissingPeriods = false,
+            MaxDegreeOfParallelism = 0,
+            EnableParallelValueColumns = false
         };
+    }
+
+    /// <summary>
+    /// 连续缺失数据处理统计
+    /// </summary>
+    public class MissingProcessingStats
+    {
+        public int Processings { get; set; }
+        public int CacheHits { get; set; }
+        public int CacheMisses { get; set; }
+
+        public void Add(MissingProcessingStats other)
+        {
+            Processings += other.Processings;
+            CacheHits += other.CacheHits;
+            CacheMisses += other.CacheMisses;
+        }
     }
 
     /// <summary>
