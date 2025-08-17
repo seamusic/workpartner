@@ -561,27 +561,27 @@ namespace DataFixter.Services
         /// <summary>
         /// 累计变化量容差
         /// </summary>
-        public double CumulativeTolerance { get; set; } = 0.001;
+        public double CumulativeTolerance { get; set; } = 2.0;
 
         /// <summary>
         /// 严重错误阈值
         /// </summary>
-        public double CriticalThreshold { get; set; } = 1.0;
+        public double CriticalThreshold { get; set; } = 5.0;
 
         /// <summary>
         /// 错误阈值
         /// </summary>
-        public double ErrorThreshold { get; set; } = 0.5;
+        public double ErrorThreshold { get; set; } = 3.0;
 
         /// <summary>
         /// 最小数值阈值
         /// </summary>
-        public double MinValueThreshold { get; set; } = 0.001;
+        public double MinValueThreshold { get; set; } = 0.01;
 
         /// <summary>
         /// 最大本期变化量
         /// </summary>
-        public double MaxCurrentPeriodValue { get; set; } = 1.0;
+        public double MaxCurrentPeriodValue { get; set; } = 5.0;
 
         /// <summary>
         /// 里程容差

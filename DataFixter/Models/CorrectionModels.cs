@@ -10,9 +10,9 @@ namespace DataFixter.Models
     public class CorrectionOptions
     {
         /// <summary>
-        /// 累计变化量容差
+        /// 累计值容差
         /// </summary>
-        public double CumulativeTolerance { get; set; } = 0.001;
+        public double CumulativeTolerance { get; set; } = 1e-6;
 
         /// <summary>
         /// 最大本期变化量
@@ -28,11 +28,6 @@ namespace DataFixter.Models
         /// 是否启用最小化修改策略
         /// </summary>
         public bool EnableMinimalModification { get; set; } = true;
-
-        /// <summary>
-        /// 是否启用前后期衔接验证
-        /// </summary>
-        public bool EnableContinuityValidation { get; set; } = true;
     }
 
     /// <summary>
@@ -69,6 +64,11 @@ namespace DataFixter.Models
         /// 修正原因
         /// </summary>
         public string Reason { get; set; } = string.Empty;
+
+        /// <summary>
+        /// 额外数据，用于存储双重修正时的累计值等信息
+        /// </summary>
+        public Dictionary<string, object>? AdditionalData { get; set; }
     }
 
     /// <summary>

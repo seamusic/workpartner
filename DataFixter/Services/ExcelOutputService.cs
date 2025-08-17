@@ -723,17 +723,43 @@ namespace DataFixter.Services
         /// <param name="outputPath">输出路径</param>
         private void GenerateExcelReport(CorrectionResult correctionResult, string outputPath)
         {
-            using var workbook = new HSSFWorkbook();
-            var sheet = workbook.CreateSheet("修正记录");
-
-            // 设置列标题
-            var headerRow = sheet.CreateRow(0);
-            var headers = new[]
+            // 检查数据量，如果超过Excel限制则分批处理
+            const int maxRowsPerSheet = 65000; // 留一些余量
+            var allCorrections = correctionResult.PointResults
+                .SelectMany(p => p.Corrections)
+                .ToList();
+            
+            if (allCorrections.Count == 0)
             {
-                "点名", "文件名", "行号", "调整类型", "数据方向", 
-                "原始值", "修正后值", "调整量", "修正原因", "时间"
-            };
-
+                _logger.LogWarning("没有修正记录需要生成Excel报告");
+                return;
+            }
+            
+            _logger.LogInformation("开始生成Excel修正报告，总修正记录数: {Count}", allCorrections.Count);
+            
+            // 如果数据量超过限制，使用多个工作表或文件
+            if (allCorrections.Count > maxRowsPerSheet)
+            {
+                GenerateLargeExcelReport(allCorrections, outputPath, maxRowsPerSheet);
+            }
+            else
+            {
+                GenerateStandardExcelReport(allCorrections, outputPath);
+            }
+        }
+        
+        /// <summary>
+        /// 生成标准Excel报告（数据量较小）
+        /// </summary>
+        private void GenerateStandardExcelReport(List<DataCorrection> corrections, string outputPath)
+        {
+            var workbook = new HSSFWorkbook();
+            var sheet = workbook.CreateSheet("修正记录");
+            
+            // 创建标题行
+            var headers = new[] { "点名", "文件名", "行号", "修正类型", "数据方向", "原始值", "修正后值", "修正原因", "修正时间" };
+            var headerRow = sheet.CreateRow(0);
+            
             for (int i = 0; i < headers.Length; i++)
             {
                 var cell = headerRow.CreateCell(i);
@@ -748,27 +774,26 @@ namespace DataFixter.Services
 
             // 写入数据
             var rowIndex = 1;
-            foreach (var record in correctionResult.AdjustmentRecords)
+            foreach (var correction in corrections)
             {
                 var row = sheet.CreateRow(rowIndex);
                 var colIndex = 0;
 
-                row.CreateCell(colIndex++).SetCellValue(record.PointName ?? "");
-                row.CreateCell(colIndex++).SetCellValue(record.FileName ?? "");
-                row.CreateCell(colIndex++).SetCellValue(record.RowNumber);
-                row.CreateCell(colIndex++).SetCellValue(record.AdjustmentType.ToString());
-                row.CreateCell(colIndex++).SetCellValue(record.DataDirection.ToString());
-                row.CreateCell(colIndex++).SetCellValue(record.OriginalValue);
-                row.CreateCell(colIndex++).SetCellValue(record.AdjustedValue);
-                row.CreateCell(colIndex++).SetCellValue(record.AdjustmentAmount);
-                row.CreateCell(colIndex++).SetCellValue(record.Reason ?? "");
-                row.CreateCell(colIndex++).SetCellValue(record.AdjustmentTime.ToString("yyyy-MM-dd HH:mm:ss"));
+                row.CreateCell(colIndex++).SetCellValue(correction.PeriodData?.PointName ?? "");
+                row.CreateCell(colIndex++).SetCellValue(correction.PeriodData?.FileInfo?.OriginalFileName ?? "");
+                row.CreateCell(colIndex++).SetCellValue(correction.PeriodData?.RowNumber ?? 0);
+                row.CreateCell(colIndex++).SetCellValue(correction.CorrectionType.ToString());
+                row.CreateCell(colIndex++).SetCellValue(correction.Direction.ToString());
+                row.CreateCell(colIndex++).SetCellValue(correction.OriginalValue);
+                row.CreateCell(colIndex++).SetCellValue(correction.CorrectedValue);
+                row.CreateCell(colIndex++).SetCellValue(correction.Reason ?? "");
+                row.CreateCell(colIndex++).SetCellValue(DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"));
 
                 rowIndex++;
             }
 
             // 设置列宽
-            var columnWidths = new[] { 15, 20, 8, 15, 12, 15, 15, 15, 30, 20 };
+            var columnWidths = new[] { 15, 20, 8, 15, 12, 15, 15, 30, 20 };
             for (int i = 0; i < columnWidths.Length; i++)
             {
                 sheet.SetColumnWidth(i, columnWidths[i] * 256);
@@ -777,6 +802,81 @@ namespace DataFixter.Services
             // 保存文件
             using var fileStream = new FileStream(outputPath, FileMode.Create, FileAccess.Write);
             workbook.Write(fileStream);
+            
+            _logger.LogInformation("标准Excel报告生成完成，共 {Count} 条记录", corrections.Count);
+        }
+        
+        /// <summary>
+        /// 生成大型Excel报告（数据量超过限制时使用）
+        /// </summary>
+        private void GenerateLargeExcelReport(List<DataCorrection> allCorrections, string baseOutputPath, int maxRowsPerSheet)
+        {
+            var totalSheets = (int)Math.Ceiling((double)allCorrections.Count / maxRowsPerSheet);
+            _logger.LogInformation("数据量较大，将生成 {TotalSheets} 个工作表", totalSheets);
+            
+            var workbook = new HSSFWorkbook();
+            
+            for (int sheetIndex = 0; sheetIndex < totalSheets; sheetIndex++)
+            {
+                var startIndex = sheetIndex * maxRowsPerSheet;
+                var endIndex = Math.Min(startIndex + maxRowsPerSheet, allCorrections.Count);
+                var sheetCorrections = allCorrections.Skip(startIndex).Take(maxRowsPerSheet).ToList();
+                
+                var sheetName = sheetIndex == 0 ? "修正记录" : $"修正记录_{sheetIndex + 1}";
+                var sheet = workbook.CreateSheet(sheetName);
+                
+                // 创建标题行
+                var headers = new[] { "点名", "文件名", "行号", "修正类型", "数据方向", "原始值", "修正后值", "修正原因", "修正时间" };
+                var headerRow = sheet.CreateRow(0);
+                
+                for (int i = 0; i < headers.Length; i++)
+                {
+                    var cell = headerRow.CreateCell(i);
+                    cell.SetCellValue(headers[i]);
+                    
+                    var style = sheet.Workbook.CreateCellStyle();
+                    var font = sheet.Workbook.CreateFont();
+                    font.IsBold = true;
+                    style.SetFont(font);
+                    cell.CellStyle = style;
+                }
+
+                // 写入数据
+                var rowIndex = 1;
+                foreach (var correction in sheetCorrections)
+                {
+                    var row = sheet.CreateRow(rowIndex);
+                    var colIndex = 0;
+
+                    row.CreateCell(colIndex++).SetCellValue(correction.PeriodData?.PointName ?? "");
+                    row.CreateCell(colIndex++).SetCellValue(correction.PeriodData?.FileInfo?.OriginalFileName ?? "");
+                    row.CreateCell(colIndex++).SetCellValue(correction.PeriodData?.RowNumber ?? 0);
+                    row.CreateCell(colIndex++).SetCellValue(correction.CorrectionType.ToString());
+                    row.CreateCell(colIndex++).SetCellValue(correction.Direction.ToString());
+                    row.CreateCell(colIndex++).SetCellValue(correction.OriginalValue);
+                    row.CreateCell(colIndex++).SetCellValue(correction.CorrectedValue);
+                    row.CreateCell(colIndex++).SetCellValue(correction.Reason ?? "");
+                    row.CreateCell(colIndex++).SetCellValue(DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"));
+
+                    rowIndex++;
+                }
+
+                // 设置列宽
+                var columnWidths = new[] { 15, 20, 8, 15, 12, 15, 15, 30, 20 };
+                for (int i = 0; i < columnWidths.Length; i++)
+                {
+                    sheet.SetColumnWidth(i, columnWidths[i] * 256);
+                }
+                
+                _logger.LogInformation("工作表 {SheetName} 生成完成，包含 {Count} 条记录", sheetName, sheetCorrections.Count);
+            }
+
+            // 保存文件
+            using var fileStream = new FileStream(baseOutputPath, FileMode.Create, FileAccess.Write);
+            workbook.Write(fileStream);
+            
+            _logger.LogInformation("大型Excel报告生成完成，共 {TotalSheets} 个工作表，总计 {TotalRecords} 条记录", 
+                totalSheets, allCorrections.Count);
         }
     }
 

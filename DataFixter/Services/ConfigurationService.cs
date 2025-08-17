@@ -88,7 +88,6 @@ namespace DataFixter.Services
                     options.MaxCurrentPeriodValue = section.GetValue<double>("MaxCurrentPeriodValue", 1.0);
                     options.MaxCumulativeValue = section.GetValue<double>("MaxCumulativeValue", 4.0);
                     options.EnableMinimalModification = section.GetValue<bool>("EnableMinimalModification", true);
-                    options.EnableContinuityValidation = section.GetValue<bool>("EnableContinuityValidation", true);
                     
                     _logger.LogInformation("从配置文件加载修正选项: 累计变化量容差={CumulativeTolerance}", options.CumulativeTolerance);
                 }

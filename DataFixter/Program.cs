@@ -13,6 +13,10 @@ namespace DataFixter
             Console.WriteLine("用于修复监测数据中累计变化量计算错误的工具");
             Console.WriteLine();
 
+            // 添加测试修正算法的调用
+            TestCorrectionAlgorithm();
+            Console.WriteLine();
+
             try
             {
                 // 检查命令行参数
@@ -156,6 +160,15 @@ namespace DataFixter
 
                 Console.WriteLine($"  修正完成: 修正 {correctionResult.AdjustmentRecords.Count} 条记录");
 
+                // 步骤5.5: 修正后重新验证数据
+                Console.WriteLine("步骤5.5: 修正后重新验证数据...");
+                var correctedValidationResults = correctionService.ValidateCorrectedMonitoringPoints(monitoringPoints);
+                
+                var correctedValidCount = correctedValidationResults.Count(v => v.Status == ValidationStatus.Valid);
+                var correctedInvalidCount = correctedValidationResults.Count(v => v.Status == ValidationStatus.Invalid);
+                
+                Console.WriteLine($"  修正后验证: 通过 {correctedValidCount} 条, 失败 {correctedInvalidCount} 条");
+
                 // 调试信息：检查修正前后的数据
                 Console.WriteLine("=== 调试信息：数据修正检查 ===");
                 var samplePoint = monitoringPoints.FirstOrDefault();
@@ -206,6 +219,145 @@ namespace DataFixter
             }
 
             return result;
+        }
+
+        /// <summary>
+        /// 测试修正算法
+        /// </summary>
+        private static void TestCorrectionAlgorithm()
+        {
+            Console.WriteLine("=== 测试修正算法 ===");
+            
+            // 创建测试数据 - 包含需要双重修正的情况
+            var testPoint = new MonitoringPoint
+            {
+                PointName = "测试点1",
+                PeriodDataList = new List<PeriodData>
+                {
+                    // 第0期：基准期
+                    new PeriodData
+                    {
+                        RowNumber = 1,
+                        CurrentPeriodX = 0.0,
+                        CurrentPeriodY = 0.0,
+                        CurrentPeriodZ = 0.0,
+                        CumulativeX = 0.0,
+                        CumulativeY = 0.0,
+                        CumulativeZ = 0.0,
+                        FileInfo = new DataFixter.Models.FileInfo("test_2025.1.1-00测试.xls", 1024, DateTime.Now.AddDays(-2))
+                    },
+                    // 第1期：本期变化量和累计值都有问题，需要双重修正
+                    new PeriodData
+                    {
+                        RowNumber = 2,
+                        CurrentPeriodX = 2.5, // 超出1.0限制
+                        CurrentPeriodY = 1.8, // 超出1.0限制
+                        CurrentPeriodZ = 1.2, // 超出1.0限制
+                        CumulativeX = 1.2,   // 错误：应该是 0.0 + 2.5 = 2.5
+                        CumulativeY = 0.8,   // 错误：应该是 0.0 + 1.8 = 1.8
+                        CumulativeZ = 0.5,   // 错误：应该是 0.0 + 1.2 = 1.2
+                        FileInfo = new DataFixter.Models.FileInfo("test_2025.1.2-00测试.xls", 1024, DateTime.Now.AddDays(-1))
+                    },
+                    // 第2期：本期变化量和累计值都有问题，需要双重修正
+                    new PeriodData
+                    {
+                        RowNumber = 3,
+                        CurrentPeriodX = 1.8, // 超出1.0限制
+                        CurrentPeriodY = 1.5, // 超出1.0限制
+                        CurrentPeriodZ = 1.1, // 超出1.0限制
+                        CumulativeX = 2.1,   // 错误：应该是 2.5 + 1.8 = 4.3
+                        CumulativeY = 1.4,   // 错误：应该是 1.8 + 1.5 = 3.3
+                        CumulativeZ = 0.9,   // 错误：应该是 1.2 + 1.1 = 2.3
+                        FileInfo = new DataFixter.Models.FileInfo("test_2025.1.3-00测试.xls", 1024, DateTime.Now)
+                    }
+                }
+            };
+            
+            var testPoints = new List<MonitoringPoint> { testPoint };
+
+            // 创建配置选项 - 使用配置文件中的值，而不是硬编码的严格值
+            var options = new Services.CorrectionOptions
+            {
+                CumulativeTolerance = 0.1,  // 使用配置文件中的值
+                MaxCurrentPeriodValue = 5.0, // 使用配置文件中的值
+                MaxCumulativeValue = 10.0    // 使用配置文件中的值
+            };
+
+            // 创建数据修正服务
+            var logger = LoggerFactory.Create(builder => builder.AddConsole()).CreateLogger<Services.DataCorrectionService>();
+            var correctionService = new Services.DataCorrectionService(logger, options);
+
+            Console.WriteLine("修正前数据:");
+            for (int i = 0; i < testPoint.PeriodDataCount; i++)
+            {
+                var data = testPoint.PeriodDataList[i];
+                Console.WriteLine($"第{i}期: X本期={data.CurrentPeriodX:F3}, X累计={data.CumulativeX:F3}");
+                Console.WriteLine($"        Y本期={data.CurrentPeriodY:F3}, Y累计={data.CumulativeY:F3}");
+                Console.WriteLine($"        Z本期={data.CurrentPeriodZ:F3}, Z累计={data.CumulativeZ:F3}");
+            }
+
+            // 创建模拟的验证结果（标记需要修正的数据）
+            var validationResults = new List<ValidationResult>
+            {
+                new ValidationResult
+                {
+                    PointName = "测试点1",
+                    Status = ValidationStatus.Invalid,
+                    ValidationType = "累计值关系验证",
+                    Description = "第1期本期变化量与累计值不一致"
+                },
+                new ValidationResult
+                {
+                    PointName = "测试点1",
+                    Status = ValidationStatus.Invalid,
+                    ValidationType = "累计值关系验证",
+                    Description = "第2期累计值计算错误"
+                }
+            };
+
+            // 执行修正 - 使用正确的方法
+            var result = correctionService.CorrectAllPoints(testPoints, validationResults);
+            Console.WriteLine($"\n修正结果: {result.Status}, 修正数量: {result.AdjustmentRecords.Count}");
+
+            Console.WriteLine("\n修正后数据:");
+            for (int i = 0; i < testPoint.PeriodDataCount; i++)
+            {
+                var data = testPoint.PeriodDataList[i];
+                Console.WriteLine($"第{i}期: X本期={data.CurrentPeriodX:F3}, X累计={data.CumulativeX:F3}");
+                Console.WriteLine($"        Y本期={data.CurrentPeriodY:F3}, Y累计={data.CumulativeY:F3}");
+                Console.WriteLine($"        Z本期={data.CurrentPeriodZ:F3}, Z累计={data.CumulativeZ:F3}");
+            }
+
+            // 验证修正后的数据
+            var validationResult = correctionService.ValidateCorrectedData(testPoint.PeriodDataList);
+            Console.WriteLine($"\n验证结果: {validationResult.Status}");
+            if (validationResult.Status == ValidationStatus.Invalid)
+            {
+                Console.WriteLine("验证失败，错误详情:");
+                foreach (var error in validationResult.ErrorDetails)
+                {
+                    Console.WriteLine($"  - {error}");
+                }
+            }
+            else
+            {
+                Console.WriteLine("验证通过！所有数据都满足累计值关系。");
+            }
+            
+            // 输出修正详情
+            Console.WriteLine("\n=== 修正详情 ===");
+            foreach (var pointResult in result.PointResults)
+            {
+                Console.WriteLine($"监测点: {pointResult.PointName} - {pointResult.Status} - {pointResult.Message}");
+                if (pointResult.Corrections.Any())
+                {
+                    foreach (var correction in pointResult.Corrections)
+                    {
+                        Console.WriteLine($"  修正: {correction.Direction}方向 {correction.CorrectionType} - {correction.OriginalValue:F6} -> {correction.CorrectedValue:F6}");
+                        Console.WriteLine($"  原因: {correction.Reason}");
+                    }
+                }
+            }
         }
 
         // 转换方法已移除，使用DataNormalizer.NormalizeData替代
