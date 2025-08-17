@@ -13,6 +13,74 @@ namespace WorkPartner.Utils
     public static class ModeRunner
     {
         /// <summary>
+        /// 运行已处理结果的累计逻辑校验模式
+        /// </summary>
+        public static async Task RunValidateProcessedMode(CommandLineArguments arguments)
+        {
+            Console.WriteLine("WorkPartner 已处理结果累计逻辑校验");
+            Console.WriteLine("================================");
+
+            var dir = !string.IsNullOrEmpty(arguments.ValidateProcessedDirectory)
+                ? arguments.ValidateProcessedDirectory
+                : (!string.IsNullOrEmpty(arguments.OutputPath) ? arguments.OutputPath : arguments.InputPath);
+
+            if (string.IsNullOrEmpty(dir) || !Directory.Exists(dir))
+            {
+                Console.WriteLine("❌ 请提供有效的已处理目录路径");
+                Console.WriteLine("使用方法: WorkPartner.exe --validate-processed <处理后目录>");
+                return;
+            }
+
+            Console.WriteLine($"📁 校验目录: {dir}");
+
+            try
+            {
+                var result = DataProcessor.ValidateProcessedCumulativeLogic(dir, arguments.Tolerance);
+
+                if (!string.IsNullOrEmpty(result.ErrorMessage))
+                {
+                    Console.WriteLine($"⚠️ 校验发生错误: {result.ErrorMessage}");
+                    return;
+                }
+
+                Console.WriteLine($"✅ 已读取 {result.TotalFiles} 个文件，涉及 {result.TotalRows} 条数据行");
+
+                if (result.InvalidGroups.Count == 0)
+                {
+                    Console.WriteLine("🎉 所有数据均符合累计逻辑: 本期累计 = 上期累计 + 本期变化");
+                }
+                else
+                {
+                    Console.WriteLine($"❗ 发现 {result.InvalidGroups.Count} 个数据名称存在不符合累计逻辑的记录");
+                    if (arguments.Verbose)
+                    {
+                        foreach (var group in result.InvalidGroups)
+                        {
+                            Console.WriteLine($"\n🔸 数据名称: {group.Name}");
+                            foreach (var item in group.Items)
+                            {
+                                Console.WriteLine($"  - 时间: {item.Timestamp:yyyy-MM-dd HH}: {item.Detail}");
+                            }
+                        }
+                    }
+                    else
+                    {
+                        Console.WriteLine("不合规的数据名称列表:");
+                        foreach (var group in result.InvalidGroups)
+                        {
+                            Console.WriteLine($"  - {group.Name}");
+                        }
+                        Console.WriteLine("(使用 -v 查看详细不合规项)");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"❌ 校验执行失败: {ex.Message}");
+            }
+        }
+
+        /// <summary>
         /// 运行大值检查模式
         /// </summary>
         /// <param name="arguments">命令行参数</param>

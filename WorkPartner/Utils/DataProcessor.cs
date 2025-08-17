@@ -13,6 +13,123 @@ namespace WorkPartner.Utils
     public static class DataProcessor
     {
         /// <summary>
+        /// 校验已处理目录下的数据是否满足：对每个 DataRow.Name、每个三列组 k∈{0,1,2}：
+        /// 本期累计(索引3+k) = 上期累计(索引3+k) + 本期变化(索引k)
+        /// 仅校验并返回不合规清单，不做修正
+        /// </summary>
+        public static CumulativeValidationResult ValidateProcessedCumulativeLogic(string processedDirectory, double tolerance)
+        {
+            var result = new CumulativeValidationResult
+            {
+                ProcessedDirectory = processedDirectory,
+                CheckTime = DateTime.Now,
+                Tolerance = tolerance
+            };
+
+            try
+            {
+                var excelFiles = FileProcessor.ScanExcelFiles(processedDirectory);
+                if (excelFiles.Count == 0)
+                {
+                    result.ErrorMessage = "未找到任何Excel文件";
+                    return result;
+                }
+
+                var parsed = FileProcessor.ParseAndSortFiles(excelFiles);
+                if (parsed.Count == 0)
+                {
+                    result.ErrorMessage = "没有找到符合命名格式的文件";
+                    return result;
+                }
+
+                var filesWithData = FileProcessor.ReadExcelData(parsed);
+                result.TotalFiles = filesWithData.Count;
+                result.TotalRows = filesWithData.Sum(f => f.DataRows.Count);
+
+                // 构建 Name -> 按时间排序后的数据点序列
+                var nameToSeries = new Dictionary<string, List<(DateTime ts, DataRow row)>>();
+                foreach (var file in filesWithData.OrderBy(f => f.Date).ThenBy(f => f.Hour))
+                {
+                    var ts = file.Date.Date.AddHours(file.Hour);
+                    foreach (var row in file.DataRows)
+                    {
+                        if (!nameToSeries.TryGetValue(row.Name, out var list))
+                        {
+                            list = new List<(DateTime, DataRow)>();
+                            nameToSeries[row.Name] = list;
+                        }
+                        list.Add((ts, row));
+                    }
+                }
+
+                foreach (var kv in nameToSeries)
+                {
+                    var name = kv.Key;
+                    var series = kv.Value.OrderBy(x => x.ts).ToList();
+                    var invalidItems = new List<CumulativeInvalidItem>();
+
+                    for (int i = 1; i < series.Count; i++)
+                    {
+                        var (tsPrev, prevRow) = series[i - 1];
+                        var (tsCurr, currRow) = series[i];
+
+                        // 需要索引0..5 存在
+                        if (currRow.Values.Count < 6 || prevRow.Values.Count < 6)
+                        {
+                            continue; // 跳过不完整行
+                        }
+
+                        for (int k = 0; k < 3; k++)
+                        {
+                            var changeIdx = k;            // 0,1,2 → 本期变化
+                            var cumIdx = 3 + k;           // 3,4,5 → 本期累计
+
+                            var change = currRow.Values[changeIdx];
+                            var currCum = currRow.Values[cumIdx];
+                            var prevCum = prevRow.Values[cumIdx];
+
+                            if (!currCum.HasValue || !prevCum.HasValue || !change.HasValue)
+                            {
+                                continue; // 缺值不校验
+                            }
+
+                            var expected = prevCum.Value + change.Value;
+                            var delta = Math.Abs((currCum.Value) - expected);
+                            if (delta > tolerance)
+                            {
+                                invalidItems.Add(new CumulativeInvalidItem
+                                {
+                                    Timestamp = tsCurr,
+                                    ColumnGroupIndex = k,
+                                    Expected = expected,
+                                    Actual = currCum.Value,
+                                    PreviousCumulative = prevCum.Value,
+                                    CurrentChange = change.Value,
+                                    Detail = $"组{k+1}: 应={expected:F3}, 实={currCum.Value:F3}, 上期累={prevCum.Value:F3}, 本期变={change.Value:F3}, 偏差={delta:F3}"
+                                });
+                            }
+                        }
+                    }
+
+                    if (invalidItems.Count > 0)
+                    {
+                        result.InvalidGroups.Add(new CumulativeInvalidGroup
+                        {
+                            Name = name,
+                            Items = invalidItems.OrderBy(x => x.Timestamp).ToList()
+                        });
+                    }
+                }
+
+                return result;
+            }
+            catch (Exception ex)
+            {
+                result.ErrorMessage = ex.Message;
+                return result;
+            }
+        }
+        /// <summary>
         /// 判断是否为累计变化量列（G列）
         /// </summary>
         private static bool IsCumulativeColumn(string columnName, DataProcessorConfig config)

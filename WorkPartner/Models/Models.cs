@@ -847,4 +847,41 @@ namespace WorkPartner.Models
         /// </summary>
         public List<FileCorrectionResult> FileCorrections { get; set; } = new List<FileCorrectionResult>();
     }
+
+    /// <summary>
+    /// 已处理结果累计逻辑校验 - 不合规项
+    /// </summary>
+    public class CumulativeInvalidItem
+    {
+        public DateTime Timestamp { get; set; }
+        public int ColumnGroupIndex { get; set; } // 0→(4,7),1→(5,8),2→(6,9)的组索引（基于0）
+        public double Expected { get; set; }
+        public double Actual { get; set; }
+        public double PreviousCumulative { get; set; }
+        public double CurrentChange { get; set; }
+        public string Detail { get; set; } = string.Empty;
+    }
+
+    /// <summary>
+    /// 已处理结果累计逻辑校验 - 按 Name 分组
+    /// </summary>
+    public class CumulativeInvalidGroup
+    {
+        public string Name { get; set; } = string.Empty;
+        public List<CumulativeInvalidItem> Items { get; set; } = new List<CumulativeInvalidItem>();
+    }
+
+    /// <summary>
+    /// 已处理结果累计逻辑校验结果
+    /// </summary>
+    public class CumulativeValidationResult
+    {
+        public string ProcessedDirectory { get; set; } = string.Empty;
+        public DateTime CheckTime { get; set; }
+        public double Tolerance { get; set; }
+        public int TotalFiles { get; set; }
+        public int TotalRows { get; set; }
+        public List<CumulativeInvalidGroup> InvalidGroups { get; set; } = new List<CumulativeInvalidGroup>();
+        public string ErrorMessage { get; set; } = string.Empty;
+    }
 }

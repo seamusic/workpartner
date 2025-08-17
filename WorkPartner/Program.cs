@@ -22,7 +22,7 @@ namespace WorkPartner
 
             try
             {
-                args = new[] { "E:\\workspace\\gmdi\\tools\\WorkPartner\\excel" };
+                // args = new[] { "E:\\workspace\\gmdi\\tools\\WorkPartner\\excel" }; // 本地调试可解注
                 // 解析命令行参数与模式分发
                 var arguments = CommandLineParser.ParseCommandLineArguments(args);
                 if (arguments == null)
@@ -46,6 +46,12 @@ namespace WorkPartner
                 if (arguments.DataCorrectionMode)
                 {
                     await ModeRunner.RunDataCorrectionMode(arguments);
+                    return;
+                }
+
+                if (arguments.ValidateProcessedMode)
+                {
+                    await ModeRunner.RunValidateProcessedMode(arguments);
                     return;
                 }
 

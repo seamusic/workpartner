@@ -22,6 +22,8 @@ namespace WorkPartner.Utils
         public bool DataCorrectionMode { get; set; } = false;
         public string CorrectionOriginalPath { get; set; } = string.Empty;
         public string CorrectionProcessedPath { get; set; } = string.Empty;
+        public bool ValidateProcessedMode { get; set; } = false;
+        public string ValidateProcessedDirectory { get; set; } = string.Empty;
     }
 
     /// <summary>
@@ -120,6 +122,13 @@ namespace WorkPartner.Utils
                             arguments.CorrectionProcessedPath = Path.Combine(arguments.CorrectionOriginalPath, "processed");
                         }
                         break;
+                    case "--validate-processed":
+                        arguments.ValidateProcessedMode = true;
+                        if (i + 1 < args.Length)
+                        {
+                            arguments.ValidateProcessedDirectory = args[++i];
+                        }
+                        break;
                     case "-h":
                     case "--help":
                         return null;
@@ -145,6 +154,12 @@ namespace WorkPartner.Utils
                             arguments.DataCorrectionMode = true;
                             arguments.CorrectionOriginalPath = args[++i];
                             arguments.CorrectionProcessedPath = args[++i];
+                        }
+                        // 校验已处理目录：--validate-processed 目录路径
+                        else if (args[i] == "--validate-processed" && i + 1 < args.Length)
+                        {
+                            arguments.ValidateProcessedMode = true;
+                            arguments.ValidateProcessedDirectory = args[++i];
                         }
                         // 如果没有指定参数，第一个参数作为输入路径
                         else if (string.IsNullOrEmpty(arguments.InputPath))
@@ -191,6 +206,7 @@ namespace WorkPartner.Utils
             Console.WriteLine("  --check-large-values    大值数据检查模式");
             Console.WriteLine("  --large-value-threshold <数值> 设置大值检查阈值 (默认: 4.0)");
             Console.WriteLine("  --data-correction       数据修正模式");
+            Console.WriteLine("  --validate-processed <目录> 校验已处理目录的累计逻辑(仅校验, 不修正)");
             Console.WriteLine("  -h, --help              显示此帮助信息");
             Console.WriteLine("");
             Console.WriteLine("支持的文件格式:");
@@ -214,6 +230,9 @@ namespace WorkPartner.Utils
             Console.WriteLine("    WorkPartner.exe --check-large-values C:\\output --large-value-threshold 3.0 -v");
             Console.WriteLine("  数据修正模式:");
             Console.WriteLine("    WorkPartner.exe --data-correction C:\\original C:\\processed");
+            Console.WriteLine("");
+            Console.WriteLine("  校验已处理目录累计逻辑:");
+            Console.WriteLine("    WorkPartner.exe --validate-processed C:\\processed -v --tolerance 0.001");
         }
     }
 }
