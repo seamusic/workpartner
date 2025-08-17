@@ -56,7 +56,7 @@ namespace DataFixter.Services
                     {
                         if (validationByPoint.TryGetValue(point.PointName, out var pointValidations))
                         {
-                            var pointResult = CorrectSinglePoint(point, pointValidations);
+                            var pointResult = CorrectPoint(point);
                             result.AddPointResult(pointResult);
                         }
                         else
@@ -107,9 +107,8 @@ namespace DataFixter.Services
         /// 修正单个监测点的数据
         /// </summary>
         /// <param name="point">监测点</param>
-        /// <param name="validations">验证结果列表</param>
         /// <returns>修正结果</returns>
-        private PointCorrectionResult CorrectSinglePoint(MonitoringPoint point, List<ValidationResult> validations)
+        private PointCorrectionResult CorrectPoint(MonitoringPoint point)
         {
             var result = new PointCorrectionResult
             {
@@ -143,28 +142,11 @@ namespace DataFixter.Services
                     {
                         corrections.AddRange(periodCorrections);
                         
-                        // 应用修正
+                        // 立即应用修正，确保后续期数的计算基于修正后的数据
                         ApplyCorrections(currentPeriod, periodCorrections);
                         
-                        // 记录修正记录
-                        foreach (var correction in periodCorrections)
-                        {
-                            var adjustmentRecord = new AdjustmentRecord(
-                                GetAdjustmentType(correction.CorrectionType),
-                                correction.Direction,
-                                correction.OriginalValue,
-                                correction.CorrectedValue,
-                                correction.Reason
-                            );
-                            
-                            adjustmentRecord.SetFileInfo(
-                                currentPeriod.FileInfo?.OriginalFileName ?? "",
-                                point.PointName,
-                                currentPeriod.RowNumber
-                            );
-                            
-                            _adjustmentRecords.Add(adjustmentRecord);
-                        }
+                        // 重新计算累计变化量，确保前后期衔接
+                        RecalculateCumulativeValues(currentPeriod, previousPeriod, periodCorrections);
                     }
                 }
 
@@ -172,20 +154,32 @@ namespace DataFixter.Services
                 result.CorrectedPeriods = corrections.Select(c => c.PeriodData).Distinct().Count();
                 result.CorrectedValues = corrections.Count;
 
-                if (corrections.Any())
+                // 记录调整记录
+                foreach (var correction in corrections)
                 {
-                    result.Message = $"修正了 {corrections.Count} 个数据值，涉及 {result.CorrectedPeriods} 个期次";
+                    var adjustmentRecord = new AdjustmentRecord
+                    {
+                        PointName = point.PointName,
+                        FileName = correction.PeriodData.FileInfo?.OriginalFileName ?? "",
+                        RowNumber = correction.PeriodData.RowNumber,
+                        AdjustmentType = GetAdjustmentType(correction.CorrectionType),
+                        DataDirection = GetDataDirection(correction.Direction),
+                        OriginalValue = correction.OriginalValue,
+                        AdjustedValue = correction.CorrectedValue,
+                        Reason = correction.Reason,
+                        AdjustmentTime = DateTime.Now
+                    };
+                    _adjustmentRecords.Add(adjustmentRecord);
                 }
-                else
-                {
-                    result.Message = "数据验证通过，无需修正";
-                }
+
+                _logger.LogInformation("监测点 {PointName} 修正完成: {CorrectionCount} 个修正", 
+                    point.PointName, corrections.Count);
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "修正监测点 {PointName} 时发生异常", point.PointName);
                 result.Status = CorrectionStatus.Error;
                 result.Message = $"修正过程中发生异常: {ex.Message}";
+                _logger.LogError(ex, "修正监测点 {PointName} 时发生异常", point.PointName);
             }
 
             return result;
@@ -277,58 +271,70 @@ namespace DataFixter.Services
             double previousCumulative, double currentPeriodValue, double currentCumulative,
             double expectedCumulative, double difference, string pointName)
         {
-            // 策略1: 优先调整本期变化量
-            var correctedPeriodValue = currentPeriodValue + (expectedCumulative - currentCumulative);
+            // 策略1: 优先保持本期变化量不变，调整累计变化量
+            // 这是最保守的策略，因为本期变化量通常更可靠
+            var correctedCumulative = expectedCumulative; // 直接使用期望值
             
-            // 检查调整后的本期变化量是否在合理范围内
-            if (Math.Abs(correctedPeriodValue) <= _options.MaxCurrentPeriodValue)
+            // 检查调整后的累计变化量是否在合理范围内
+            if (Math.Abs(correctedCumulative) <= _options.MaxCumulativeValue)
             {
+                // 累计变化量在合理范围内，只调整累计变化量
                 return new DataCorrection
                 {
                     PeriodData = currentPeriod,
                     Direction = direction,
-                    CorrectionType = CorrectionType.CurrentPeriodValue,
-                    OriginalValue = currentPeriodValue,
-                    CorrectedValue = correctedPeriodValue,
-                    Reason = $"调整本期变化量以修正累计变化量计算错误，期望累计值: {expectedCumulative:F6}"
+                    CorrectionType = CorrectionType.CumulativeValue,
+                    OriginalValue = currentCumulative,
+                    CorrectedValue = correctedCumulative,
+                    Reason = $"调整累计变化量，保持本期变化量不变。累计变化量: {currentCumulative:F6} → {correctedCumulative:F6}, 本期变化量保持: {currentPeriodValue:F6}"
                 };
             }
-
-            // 策略2: 当本期变化量调整后仍不满足要求时，调整累计变化量
-            var correctedCumulative = expectedCumulative;
-            
-            // 确保调整后的累计变化量绝对值不超过限制
-            if (Math.Abs(correctedCumulative) > _options.MaxCumulativeValue)
+            else
             {
-                // 如果超出限制，尝试调整本期变化量到合理范围
+                // 累计变化量超出限制，需要调整本期变化量
                 var maxAllowedPeriodValue = _options.MaxCurrentPeriodValue;
                 var minAllowedPeriodValue = -_options.MaxCurrentPeriodValue;
                 
-                var adjustedPeriodValue = Math.Max(minAllowedPeriodValue, 
-                    Math.Min(maxAllowedPeriodValue, currentPeriodValue));
+                // 计算本期变化量的合理范围
+                var maxPeriodValue = Math.Min(maxAllowedPeriodValue, _options.MaxCumulativeValue - previousCumulative);
+                var minPeriodValue = Math.Max(minAllowedPeriodValue, -_options.MaxCumulativeValue - previousCumulative);
                 
-                correctedCumulative = previousCumulative + adjustedPeriodValue;
+                // 尝试将本期变化量调整到合理范围
+                var adjustedPeriodValue = Math.Max(minPeriodValue, 
+                    Math.Min(maxPeriodValue, currentPeriodValue));
                 
-                return new DataCorrection
+                var adjustedCumulative = previousCumulative + adjustedPeriodValue;
+                
+                // 确保调整后的累计变化量也在合理范围内
+                if (Math.Abs(adjustedCumulative) <= _options.MaxCumulativeValue)
                 {
-                    PeriodData = currentPeriod,
-                    Direction = direction,
-                    CorrectionType = CorrectionType.Both,
-                    OriginalValue = currentPeriodValue,
-                    CorrectedValue = adjustedPeriodValue,
-                    Reason = $"同时调整本期变化量和累计变化量，确保数据在合理范围内"
-                };
+                    return new DataCorrection
+                    {
+                        PeriodData = currentPeriod,
+                        Direction = direction,
+                        CorrectionType = CorrectionType.Both,
+                        OriginalValue = currentPeriodValue,
+                        CorrectedValue = adjustedPeriodValue,
+                        Reason = $"调整本期变化量和累计变化量到合理范围。本期变化量: {currentPeriodValue:F6} → {adjustedPeriodValue:F6}, 累计变化量: {currentCumulative:F6} → {adjustedCumulative:F6}"
+                    };
+                }
+                else
+                {
+                    // 如果仍然超出范围，采用最保守的策略
+                    var conservativePeriodValue = 0.0; // 本期变化量为0
+                    var conservativeCumulative = previousCumulative; // 累计变化量保持不变
+                    
+                    return new DataCorrection
+                    {
+                        PeriodData = currentPeriod,
+                        Direction = direction,
+                        CorrectionType = CorrectionType.Both,
+                        OriginalValue = currentPeriodValue,
+                        CorrectedValue = conservativePeriodValue,
+                        Reason = $"采用最保守策略：本期变化量设为0，累计变化量保持不变。本期变化量: {currentPeriodValue:F6} → {conservativePeriodValue:F6}, 累计变化量: {currentCumulative:F6} → {conservativeCumulative:F6}"
+                    };
+                }
             }
-
-            return new DataCorrection
-            {
-                PeriodData = currentPeriod,
-                Direction = direction,
-                CorrectionType = CorrectionType.CumulativeValue,
-                OriginalValue = currentCumulative,
-                CorrectedValue = correctedCumulative,
-                Reason = $"调整累计变化量以修正计算错误，期望值: {expectedCumulative:F6}"
-            };
         }
 
         /// <summary>
@@ -446,9 +452,9 @@ namespace DataFixter.Services
         /// <returns>上一期数据</returns>
         private PeriodData? GetPreviousPeriod(PeriodData currentPeriod)
         {
-            // 这里需要根据实际的数据结构来获取上一期数据
             // 由于当前实现中PeriodData没有直接引用上一期，我们需要通过其他方式获取
-            // 暂时返回null，实际使用时需要传入完整的监测点数据
+            // 这里需要从外部传入完整的监测点数据来获取上一期
+            // 暂时返回null，实际使用时需要重构数据传递方式
             return null;
         }
 
@@ -483,6 +489,88 @@ namespace DataFixter.Services
                 CorrectionType.Both => AdjustmentType.Cumulative, // 双重修正时使用累计类型
                 _ => AdjustmentType.None
             };
+        }
+
+        /// <summary>
+        /// 将数据方向转换为调整方向
+        /// </summary>
+        /// <param name="direction">数据方向</param>
+        /// <returns>调整方向</returns>
+        private DataDirection GetDataDirection(DataDirection direction)
+        {
+            return direction; // 直接返回，因为类型相同
+        }
+
+        /// <summary>
+        /// 重新计算当前期和累计值，确保前后期衔接
+        /// </summary>
+        /// <param name="currentPeriod">当前期数据</param>
+        /// <param name="previousPeriod">上一期数据</param>
+        /// <param name="corrections">修正列表</param>
+        private void RecalculateCumulativeValues(PeriodData currentPeriod, PeriodData previousPeriod, List<DataCorrection> corrections)
+        {
+            // 重新计算X方向
+            var xCorrections = corrections.Where(c => c.Direction == DataDirection.X).ToList();
+            if (xCorrections.Any())
+            {
+                var previousCumulativeX = previousPeriod.CumulativeX;
+                var currentPeriodValueX = currentPeriod.CurrentPeriodX;
+                
+                foreach (var correction in xCorrections)
+                {
+                    if (correction.CorrectionType == CorrectionType.CurrentPeriodValue || 
+                        correction.CorrectionType == CorrectionType.Both)
+                    {
+                        currentPeriodValueX = correction.CorrectedValue;
+                    }
+                }
+                
+                // 重新计算累计值
+                currentPeriod.CumulativeX = previousCumulativeX + currentPeriodValueX;
+                currentPeriod.CurrentPeriodX = currentPeriodValueX;
+            }
+
+            // 重新计算Y方向
+            var yCorrections = corrections.Where(c => c.Direction == DataDirection.Y).ToList();
+            if (yCorrections.Any())
+            {
+                var previousCumulativeY = previousPeriod.CumulativeY;
+                var currentPeriodValueY = currentPeriod.CurrentPeriodY;
+                
+                foreach (var correction in yCorrections)
+                {
+                    if (correction.CorrectionType == CorrectionType.CurrentPeriodValue || 
+                        correction.CorrectionType == CorrectionType.Both)
+                    {
+                        currentPeriodValueY = correction.CorrectedValue;
+                    }
+                }
+                
+                // 重新计算累计值
+                currentPeriod.CumulativeY = previousCumulativeY + currentPeriodValueY;
+                currentPeriod.CurrentPeriodY = currentPeriodValueY;
+            }
+
+            // 重新计算Z方向
+            var zCorrections = corrections.Where(c => c.Direction == DataDirection.Z).ToList();
+            if (zCorrections.Any())
+            {
+                var previousCumulativeZ = previousPeriod.CumulativeZ;
+                var currentPeriodValueZ = currentPeriod.CurrentPeriodZ;
+                
+                foreach (var correction in zCorrections)
+                {
+                    if (correction.CorrectionType == CorrectionType.CurrentPeriodValue || 
+                        correction.CorrectionType == CorrectionType.Both)
+                    {
+                        currentPeriodValueZ = correction.CorrectedValue;
+                    }
+                }
+                
+                // 重新计算累计值
+                currentPeriod.CumulativeZ = previousCumulativeZ + currentPeriodValueZ;
+                currentPeriod.CurrentPeriodZ = currentPeriodValueZ;
+            }
         }
 
         /// <summary>
