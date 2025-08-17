@@ -251,6 +251,11 @@ namespace DataFixter.Services
             // 首先尝试自动检测列位置
             var columnMapping = DetectColumnMapping(sheet);
             
+            // 调试信息：输出列映射结果
+            _logger.LogInformation("列映射检测结果: X本期={CurrentPeriodX}, Y本期={CurrentPeriodY}, Z本期={CurrentPeriodZ}, X累计={CumulativeX}, Y累计={CumulativeY}, Z累计={CumulativeZ}", 
+                columnMapping.CurrentPeriodX, columnMapping.CurrentPeriodY, columnMapping.CurrentPeriodZ,
+                columnMapping.CumulativeX, columnMapping.CumulativeY, columnMapping.CumulativeZ);
+            
             foreach (var data in fileData)
             {
                 if (data.RowNumber > 0 && data.RowNumber <= sheet.LastRowNum + 1)
@@ -259,29 +264,68 @@ namespace DataFixter.Services
                     var row = sheet.GetRow(rowIndex);
                     if (row != null)
                     {
+                        // 修正本期变化量列
+                        if (columnMapping.CurrentPeriodX >= 0)
+                        {
+                            var cell = row.GetCell(columnMapping.CurrentPeriodX) ?? row.CreateCell(columnMapping.CurrentPeriodX);
+                            var originalValue = cell.NumericCellValue;
+                            cell.SetCellValue(data.CurrentPeriodX);
+                            _logger.LogDebug("修正X本期变化量: 行{RowNumber}, 列{ColumnIndex}, {OriginalValue} -> {CorrectedValue}", 
+                                data.RowNumber, columnMapping.CurrentPeriodX, originalValue, data.CurrentPeriodX);
+                            correctedRows++;
+                        }
+                        if (columnMapping.CurrentPeriodY >= 0)
+                        {
+                            var cell = row.GetCell(columnMapping.CurrentPeriodY) ?? row.CreateCell(columnMapping.CurrentPeriodY);
+                            var originalValue = cell.NumericCellValue;
+                            cell.SetCellValue(data.CurrentPeriodY);
+                            _logger.LogDebug("修正Y本期变化量: 行{RowNumber}, 列{ColumnIndex}, {OriginalValue} -> {CorrectedValue}", 
+                                data.RowNumber, columnMapping.CurrentPeriodY, originalValue, data.CurrentPeriodY);
+                            correctedRows++;
+                        }
+                        if (columnMapping.CurrentPeriodZ >= 0)
+                        {
+                            var cell = row.GetCell(columnMapping.CurrentPeriodZ) ?? row.CreateCell(columnMapping.CurrentPeriodZ);
+                            var originalValue = cell.NumericCellValue;
+                            cell.SetCellValue(data.CurrentPeriodZ);
+                            _logger.LogDebug("修正Z本期变化量: 行{RowNumber}, 列{ColumnIndex}, {OriginalValue} -> {CorrectedValue}", 
+                                data.RowNumber, columnMapping.CurrentPeriodZ, originalValue, data.CurrentPeriodZ);
+                            correctedRows++;
+                        }
+                        
                         // 修正累计变化量列
                         if (columnMapping.CumulativeX >= 0)
                         {
                             var cell = row.GetCell(columnMapping.CumulativeX) ?? row.CreateCell(columnMapping.CumulativeX);
+                            var originalValue = cell.NumericCellValue;
                             cell.SetCellValue(data.CumulativeX);
+                            _logger.LogDebug("修正X累计变化量: 行{RowNumber}, 列{ColumnIndex}, {OriginalValue} -> {CorrectedValue}", 
+                                data.RowNumber, columnMapping.CumulativeX, originalValue, data.CumulativeX);
                             correctedRows++;
                         }
                         if (columnMapping.CumulativeY >= 0)
                         {
                             var cell = row.GetCell(columnMapping.CumulativeY) ?? row.CreateCell(columnMapping.CumulativeY);
+                            var originalValue = cell.NumericCellValue;
                             cell.SetCellValue(data.CumulativeY);
+                            _logger.LogDebug("修正Y累计变化量: 行{RowNumber}, 列{ColumnIndex}, {OriginalValue} -> {CorrectedValue}", 
+                                data.RowNumber, columnMapping.CumulativeY, originalValue, data.CumulativeY);
                             correctedRows++;
                         }
                         if (columnMapping.CumulativeZ >= 0)
                         {
                             var cell = row.GetCell(columnMapping.CumulativeZ) ?? row.CreateCell(columnMapping.CumulativeZ);
+                            var originalValue = cell.NumericCellValue;
                             cell.SetCellValue(data.CumulativeZ);
+                            _logger.LogDebug("修正Z累计变化量: 行{RowNumber}, 列{ColumnIndex}, {OriginalValue} -> {CorrectedValue}", 
+                                data.RowNumber, columnMapping.CumulativeZ, originalValue, data.CumulativeZ);
                             correctedRows++;
                         }
                     }
                 }
             }
             
+            _logger.LogInformation("数据修正完成: 修正了 {CorrectedRows} 个数据项", correctedRows);
             return correctedRows;
         }
 
@@ -296,7 +340,18 @@ namespace DataFixter.Services
             
             // 查找标题行（通常是第4行，索引3）
             var headerRow = sheet.GetRow(3);
-            if (headerRow == null) return mapping;
+            if (headerRow == null) 
+            {
+                _logger.LogWarning("未找到标题行（第4行）");
+                return mapping;
+            }
+            
+            _logger.LogInformation("检测到标题行，列数: {ColumnCount}", headerRow.LastCellNum);
+            
+            // 存储所有X轴、Y轴、Z轴列的位置
+            var xAxisColumns = new List<int>();
+            var yAxisColumns = new List<int>();
+            var zAxisColumns = new List<int>();
             
             // 遍历标题行，查找相关列
             for (int i = 0; i < headerRow.LastCellNum; i++)
@@ -305,22 +360,133 @@ namespace DataFixter.Services
                 if (cell == null) continue;
                 
                 var cellValue = cell.StringCellValue?.ToLower() ?? "";
+                var originalValue = cell.StringCellValue ?? "";
+                _logger.LogInformation("列{ColumnIndex}: 原始值='{OriginalValue}', 处理后='{CellValue}'", i, originalValue, cellValue);
                 
+                // 检测本期变化量列
+                if (cellValue.Contains("本期") && cellValue.Contains("x"))
+                {
+                    mapping.CurrentPeriodX = i;
+                    _logger.LogInformation("检测到X本期变化量列: 列{ColumnIndex}", i);
+                }
+                else if (cellValue.Contains("本期") && cellValue.Contains("y"))
+                {
+                    mapping.CurrentPeriodY = i;
+                    _logger.LogInformation("检测到Y本期变化量列: 列{ColumnIndex}", i);
+                }
+                else if (cellValue.Contains("本期") && cellValue.Contains("z"))
+                {
+                    mapping.CurrentPeriodZ = i;
+                    _logger.LogInformation("检测到Z本期变化量列: 列{ColumnIndex}", i);
+                }
+                // 支持英文列名
+                else if (cellValue.Contains("current") && cellValue.Contains("x"))
+                {
+                    mapping.CurrentPeriodX = i;
+                    _logger.LogInformation("检测到X本期变化量列(英文): 列{ColumnIndex}", i);
+                }
+                else if (cellValue.Contains("current") && cellValue.Contains("y"))
+                {
+                    mapping.CurrentPeriodY = i;
+                    _logger.LogInformation("检测到Y本期变化量列(英文): 列{ColumnIndex}", i);
+                }
+                else if (cellValue.Contains("current") && cellValue.Contains("z"))
+                {
+                    mapping.CurrentPeriodZ = i;
+                    _logger.LogInformation("检测到Z本期变化量列(英文): 列{ColumnIndex}", i);
+                }
                 // 检测累计变化量列
-                if (cellValue.Contains("累计") && cellValue.Contains("x"))
+                else if (cellValue.Contains("累计") && cellValue.Contains("x"))
+                {
                     mapping.CumulativeX = i;
+                    _logger.LogInformation("检测到X累计变化量列: 列{ColumnIndex}", i);
+                }
                 else if (cellValue.Contains("累计") && cellValue.Contains("y"))
+                {
                     mapping.CumulativeY = i;
+                    _logger.LogInformation("检测到Y累计变化量列: 列{ColumnIndex}", i);
+                }
                 else if (cellValue.Contains("累计") && cellValue.Contains("z"))
+                {
                     mapping.CumulativeZ = i;
+                    _logger.LogInformation("检测到Z累计变化量列: 列{ColumnIndex}", i);
+                }
                 // 支持英文列名
                 else if (cellValue.Contains("cumulative") && cellValue.Contains("x"))
+                {
                     mapping.CumulativeX = i;
+                    _logger.LogInformation("检测到X累计变化量列(英文): 列{ColumnIndex}", i);
+                }
                 else if (cellValue.Contains("cumulative") && cellValue.Contains("y"))
+                {
                     mapping.CumulativeY = i;
+                    _logger.LogInformation("检测到Y累计变化量列(英文): 列{ColumnIndex}", i);
+                }
                 else if (cellValue.Contains("cumulative") && cellValue.Contains("z"))
+                {
                     mapping.CumulativeZ = i;
+                    _logger.LogInformation("检测到Z累计变化量列(英文): 列{ColumnIndex}", i);
+                }
+                // 检测"X轴"、"Y轴"、"Z轴"格式的列
+                else if (cellValue == "x轴")
+                {
+                    xAxisColumns.Add(i);
+                    _logger.LogInformation("检测到X轴列: 列{ColumnIndex}", i);
+                }
+                else if (cellValue == "y轴")
+                {
+                    yAxisColumns.Add(i);
+                    _logger.LogInformation("检测到Y轴列: 列{ColumnIndex}", i);
+                }
+                else if (cellValue == "z轴")
+                {
+                    zAxisColumns.Add(i);
+                    _logger.LogInformation("检测到Z轴列: 列{ColumnIndex}", i);
+                }
             }
+            
+            // 智能列分组识别：基于列位置和数量推断列类型
+            if (xAxisColumns.Count >= 2 && yAxisColumns.Count >= 2 && zAxisColumns.Count >= 2)
+            {
+                _logger.LogInformation("检测到多组X轴、Y轴、Z轴列，进行智能分组识别");
+                
+                // 假设：第一组是本期变化量，第二组是累计变化量，第三组是日变化量
+                if (xAxisColumns.Count >= 1)
+                {
+                    mapping.CurrentPeriodX = xAxisColumns[0];
+                    _logger.LogInformation("推断X本期变化量列: 列{ColumnIndex}", xAxisColumns[0]);
+                }
+                if (yAxisColumns.Count >= 1)
+                {
+                    mapping.CurrentPeriodY = yAxisColumns[0];
+                    _logger.LogInformation("推断Y本期变化量列: 列{ColumnIndex}", yAxisColumns[0]);
+                }
+                if (zAxisColumns.Count >= 1)
+                {
+                    mapping.CurrentPeriodZ = zAxisColumns[0];
+                    _logger.LogInformation("推断Z本期变化量列: 列{ColumnIndex}", zAxisColumns[0]);
+                }
+                
+                if (xAxisColumns.Count >= 2)
+                {
+                    mapping.CumulativeX = xAxisColumns[1];
+                    _logger.LogInformation("推断X累计变化量列: 列{ColumnIndex}", xAxisColumns[1]);
+                }
+                if (yAxisColumns.Count >= 2)
+                {
+                    mapping.CumulativeY = yAxisColumns[1];
+                    _logger.LogInformation("推断Y累计变化量列: 列{ColumnIndex}", yAxisColumns[1]);
+                }
+                if (zAxisColumns.Count >= 2)
+                {
+                    mapping.CumulativeZ = zAxisColumns[1];
+                    _logger.LogInformation("推断Z累计变化量列: 列{ColumnIndex}", zAxisColumns[1]);
+                }
+            }
+            
+            _logger.LogInformation("列映射检测完成: X本期={CurrentPeriodX}, Y本期={CurrentPeriodY}, Z本期={CurrentPeriodZ}, X累计={CumulativeX}, Y累计={CumulativeY}, Z累计={CumulativeZ}", 
+                mapping.CurrentPeriodX, mapping.CurrentPeriodY, mapping.CurrentPeriodZ,
+                mapping.CumulativeX, mapping.CumulativeY, mapping.CumulativeZ);
             
             return mapping;
         }
@@ -376,7 +542,7 @@ namespace DataFixter.Services
             var nameWithoutExt = Path.GetFileNameWithoutExtension(originalFileName);
             var extension = Path.GetExtension(originalFileName);
             // 保持原始扩展名，因为我们使用的是HSSFWorkbook
-            return $"{nameWithoutExt}_修正后{extension}";
+            return $"{nameWithoutExt}{extension}";
         }
 
         /// <summary>
@@ -407,9 +573,9 @@ namespace DataFixter.Services
                 var statisticsPath = Path.Combine(outputDirectory, "修正统计报告.txt");
                 File.WriteAllText(statisticsPath, statisticsReport, System.Text.Encoding.UTF8);
 
-                // 生成Excel格式的修正记录
-                var excelReportPath = Path.Combine(outputDirectory, "修正记录.xlsx");
-                GenerateExcelReport(correctionResult, excelReportPath);
+                                 // 生成Excel格式的修正记录
+                 var excelReportPath = Path.Combine(outputDirectory, "修正记录.xls");
+                 GenerateExcelReport(correctionResult, excelReportPath);
 
                 result.Status = ReportStatus.Success;
                 result.Message = "报告生成成功";
@@ -459,13 +625,13 @@ namespace DataFixter.Services
             report.AppendLine($"需要修正: {needsAdjustmentCount} 条");
             report.AppendLine();
 
-            // 修正详情
-            report.AppendLine("【修正详情】");
-            foreach (var pointResult in correctionResult.PointResults)
-            {
-                report.AppendLine($"监测点: {pointResult.PointName}");
-                report.AppendLine($"  状态: {pointResult.Status}");
-                report.AppendLine($"  消息: {pointResult.Message}");
+                         // 修正详情
+             report.AppendLine("【修正详情】");
+             foreach (var pointResult in correctionResult.PointResults)
+             {
+                 report.AppendLine($"点名: {pointResult.PointName}");
+                 report.AppendLine($"  状态: {pointResult.Status}");
+                 report.AppendLine($"  消息: {pointResult.Message}");
                 
                 if (pointResult.Corrections.Any())
                 {
@@ -497,16 +663,16 @@ namespace DataFixter.Services
             report.AppendLine($"生成时间: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
             report.AppendLine();
 
-            // 修正统计
-            var statistics = correctionResult.AdjustmentRecords;
-            var totalAdjustments = statistics.Count;
-            var totalPoints = statistics.Select(r => r.PointName).Distinct().Count();
-            var totalFiles = statistics.Select(r => r.FileName).Where(f => !string.IsNullOrEmpty(f)).Distinct().Count();
-
-            report.AppendLine("【修正统计】");
-            report.AppendLine($"总修正次数: {totalAdjustments}");
-            report.AppendLine($"涉及监测点数: {totalPoints}");
-            report.AppendLine($"涉及文件数: {totalFiles}");
+                         // 修正统计
+             var statistics = correctionResult.AdjustmentRecords;
+             var totalAdjustments = statistics.Count;
+             var totalPoints = statistics.Select(r => r.PointName).Distinct().Count();
+             var totalFiles = statistics.Select(r => r.FileName).Where(f => !string.IsNullOrEmpty(f)).Distinct().Count();
+ 
+             report.AppendLine("【修正统计】");
+             report.AppendLine($"总修正次数: {totalAdjustments}");
+             report.AppendLine($"涉及点名数: {totalPoints}");
+             report.AppendLine($"涉及文件数: {totalFiles}");
             report.AppendLine();
 
             // 按调整类型统计
@@ -643,6 +809,21 @@ namespace DataFixter.Services
 /// </summary>
 public class ColumnMapping
 {
+    /// <summary>
+    /// 本期变化量X列索引
+    /// </summary>
+    public int CurrentPeriodX { get; set; } = -1;
+    
+    /// <summary>
+    /// 本期变化量Y列索引
+    /// </summary>
+    public int CurrentPeriodY { get; set; } = -1;
+    
+    /// <summary>
+    /// 本期变化量Z列索引
+    /// </summary>
+    public int CurrentPeriodZ { get; set; } = -1;
+    
     /// <summary>
     /// 累计变化量X列索引
     /// </summary>

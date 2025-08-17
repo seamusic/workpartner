@@ -56,6 +56,13 @@ namespace DataFixter
                 Console.WriteLine(result.GetSummary());
                 Console.WriteLine();
                 Console.WriteLine("详细报告已生成到输出目录");
+                Console.WriteLine();
+                Console.WriteLine("=== 验证修正结果 ===");
+                Console.WriteLine("1. 检查 '修正后' 目录中的Excel文件");
+                Console.WriteLine("2. 对比原始文件和修正后文件的数据");
+                Console.WriteLine("3. 查看 '修正详细报告.txt' 了解具体修正内容");
+                Console.WriteLine("4. 如果文件大小相同，这是正常的Excel格式特性");
+                Console.WriteLine("5. 重点检查列3-8的数据是否已按修正逻辑更新");
             }
             catch (Exception ex)
             {
@@ -124,7 +131,12 @@ namespace DataFixter
 
                 // 步骤4: 数据验证
                 Console.WriteLine("步骤4: 数据验证...");
-                var validationService = new DataValidationService(loggerFactory.CreateLogger<DataValidationService>());
+                
+                // 创建配置服务并获取验证选项
+                var configService = new ConfigurationService(loggerFactory.CreateLogger<ConfigurationService>());
+                var validationOptions = configService.GetValidationOptions();
+                
+                var validationService = new DataValidationService(loggerFactory.CreateLogger<DataValidationService>(), validationOptions);
                 var validationResults = validationService.ValidateAllPoints(monitoringPoints, normalizedComparisonData);
 
                 var validCount = validationResults.Count(v => v.Status == ValidationStatus.Valid);
@@ -135,15 +147,38 @@ namespace DataFixter
 
                 // 步骤5: 数据修正
                 Console.WriteLine("步骤5: 数据修正...");
-                var correctionService = new DataCorrectionService(loggerFactory.CreateLogger<DataCorrectionService>());
+                
+                // 获取修正选项
+                var correctionOptions = configService.GetCorrectionOptions();
+                
+                var correctionService = new DataCorrectionService(loggerFactory.CreateLogger<DataCorrectionService>(), correctionOptions);
                 var correctionResult = correctionService.CorrectAllPoints(monitoringPoints, validationResults);
 
                 Console.WriteLine($"  修正完成: 修正 {correctionResult.AdjustmentRecords.Count} 条记录");
 
+                // 调试信息：检查修正前后的数据
+                Console.WriteLine("=== 调试信息：数据修正检查 ===");
+                var samplePoint = monitoringPoints.FirstOrDefault();
+                if (samplePoint != null)
+                {
+                    Console.WriteLine($"示例监测点: {samplePoint.PointName}");
+                    var sampleData = samplePoint.PeriodDataList.FirstOrDefault();
+                    if (sampleData != null)
+                    {
+                        Console.WriteLine($"  修正前 - X本期: {sampleData.CurrentPeriodX}, X累计: {sampleData.CumulativeX}");
+                        Console.WriteLine($"  修正前 - Y本期: {sampleData.CurrentPeriodY}, Y累计: {sampleData.CumulativeY}");
+                        Console.WriteLine($"  修正前 - Z本期: {sampleData.CurrentPeriodZ}, Z累计: {sampleData.CumulativeZ}");
+                    }
+                }
+
                 // 步骤6: 生成输出文件
                 Console.WriteLine("步骤6: 生成输出文件...");
                 var outputDirectory = Path.Combine(processedDirectory, "修正后");
-                var outputService = new ExcelOutputService(loggerFactory.CreateLogger<ExcelOutputService>());
+                
+                // 获取输出选项
+                var outputOptions = configService.GetOutputOptions();
+                
+                var outputService = new ExcelOutputService(loggerFactory.CreateLogger<ExcelOutputService>(), outputOptions);
 
                 var outputResult = outputService.GenerateCorrectedExcelFiles(monitoringPoints, outputDirectory, processedDirectory);
                 var reportResult = outputService.GenerateCorrectionReport(correctionResult, validationResults, outputDirectory);
