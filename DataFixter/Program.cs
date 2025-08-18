@@ -10,68 +10,42 @@ namespace DataFixter
     {
         static void Main(string[] args)
         {
-            // 配置Serilog日志
-            LoggingConfiguration.ConfigureLogging();
-            
-            Console.WriteLine("=== DataFixter 数据修正工具 ===");
-            Console.WriteLine("用于修复监测数据中累计变化量计算错误的工具");
-            Console.WriteLine();
-
-            // 添加测试修正算法的调用
-            //TestCorrectionAlgorithm();
-            Console.WriteLine();
-
             try
             {
-                args = new[] { "E:\\tmp\\02上传成果(1)\\02上传成果\\processed", "E:\\tmp\\02上传成果(1)\\02上传成果" };
-                // 检查命令行参数
-                if (args.Length != 2)
+                // 配置Serilog日志
+                LoggingConfiguration.ConfigureLogging();
+                
+                var logger = Log.ForContext<Program>();
+                logger.Information("=== DataFixter 数据修正工具启动 ===");
+                
+                // 显示欢迎信息
+                ShowWelcomeMessage();
+
+                // 处理命令行参数
+                if (!TryParseArguments(args, out var processedDirectory, out var comparisonDirectory))
                 {
                     ShowUsage();
                     return;
                 }
 
-                var processedDirectory = args[0];
-                var comparisonDirectory = args[1];
-
-                // 验证目录是否存在
-                if (!Directory.Exists(processedDirectory))
+                // 验证目录
+                if (!ValidateDirectories(processedDirectory, comparisonDirectory))
                 {
-                    Console.WriteLine($"错误: 待处理目录不存在: {processedDirectory}");
                     return;
                 }
 
-                if (!Directory.Exists(comparisonDirectory))
-                {
-                    Console.WriteLine($"错误: 对比目录不存在: {comparisonDirectory}");
-                    return;
-                }
-
-                Console.WriteLine($"待处理目录: {processedDirectory}");
-                Console.WriteLine($"对比目录: {comparisonDirectory}");
-                Console.WriteLine();
-
-                // 执行完整的批量处理流程
+                // 执行批量处理
                 var result = ExecuteBatchProcessing(processedDirectory, comparisonDirectory);
 
-                // 输出处理结果
-                Console.WriteLine("=== 处理完成 ===");
-                Console.WriteLine(result.GetSummary());
-                Console.WriteLine();
-                Console.WriteLine("详细报告已生成到输出目录");
-                Console.WriteLine();
-                Console.WriteLine("=== 验证修正结果 ===");
-                Console.WriteLine("1. 检查 '修正后' 目录中的Excel文件");
-                Console.WriteLine("2. 对比原始文件和修正后文件的数据");
-                Console.WriteLine("3. 查看 '修正详细报告.txt' 了解具体修正内容");
-                Console.WriteLine("4. 如果文件大小相同，这是正常的Excel格式特性");
-                Console.WriteLine("5. 重点检查列3-8的数据是否已按修正逻辑更新");
+                // 显示处理结果
+                ShowProcessingResults(result);
+                
+                logger.Information("=== DataFixter 数据修正工具完成 ===");
             }
             catch (Exception ex)
             {
                 Log.Error(ex, "DataFixter 运行时发生致命错误: {Message}", ex.Message);
                 Console.WriteLine($"DataFixter 运行时发生致命错误: {ex.Message}");
-                Console.WriteLine($"详细错误信息: {ex}");
             }
             finally
             {
@@ -81,29 +55,71 @@ namespace DataFixter
         }
 
         /// <summary>
-        /// 显示使用说明
+        /// 显示欢迎信息
         /// </summary>
-        static void ShowUsage()
+        private static void ShowWelcomeMessage()
         {
-            Console.WriteLine("使用方法:");
-            Console.WriteLine("DataFixter <待处理目录> <对比目录>");
+            Console.WriteLine("=== DataFixter 数据修正工具 ===");
+            Console.WriteLine("用于修复监测数据中累计变化量计算错误的工具");
             Console.WriteLine();
-            Console.WriteLine("参数说明:");
-            Console.WriteLine("  待处理目录: 包含需要修正的Excel文件的目录");
-            Console.WriteLine("  对比目录: 包含对比数据的Excel文件的目录");
+        }
+
+        /// <summary>
+        /// 解析命令行参数
+        /// </summary>
+        /// <param name="args">命令行参数</param>
+        /// <param name="processedDirectory">待处理目录</param>
+        /// <param name="comparisonDirectory">对比目录</param>
+        /// <returns>是否解析成功</returns>
+        private static bool TryParseArguments(string[] args, out string processedDirectory, out string comparisonDirectory)
+        {
+            processedDirectory = string.Empty;
+            comparisonDirectory = string.Empty;
+
+            if (args.Length != 2)
+            {
+                return false;
+            }
+
+            processedDirectory = args[0];
+            comparisonDirectory = args[1];
+            return true;
+        }
+
+        /// <summary>
+        /// 验证目录是否存在
+        /// </summary>
+        /// <param name="processedDirectory">待处理目录</param>
+        /// <param name="comparisonDirectory">对比目录</param>
+        /// <returns>是否验证通过</returns>
+        private static bool ValidateDirectories(string processedDirectory, string comparisonDirectory)
+        {
+            if (!Directory.Exists(processedDirectory))
+            {
+                Console.WriteLine($"错误: 待处理目录不存在: {processedDirectory}");
+                return false;
+            }
+
+            if (!Directory.Exists(comparisonDirectory))
+            {
+                Console.WriteLine($"错误: 对比目录不存在: {comparisonDirectory}");
+                return false;
+            }
+
+            Console.WriteLine($"待处理目录: {processedDirectory}");
+            Console.WriteLine($"对比目录: {comparisonDirectory}");
             Console.WriteLine();
-            Console.WriteLine("示例:");
-            Console.WriteLine("DataFixter \"E:\\data\\processed\" \"E:\\data\\comparison\"");
+            
+            return true;
         }
 
         /// <summary>
         /// 执行完整的批量处理流程
         /// </summary>
-        /// <param name="loggerFactory">日志工厂</param>
         /// <param name="processedDirectory">待处理目录</param>
         /// <param name="comparisonDirectory">对比目录</param>
         /// <returns>处理结果</returns>
-        static ProcessingResult ExecuteBatchProcessing(string processedDirectory, string comparisonDirectory)
+        private static ProcessingResult ExecuteBatchProcessing(string processedDirectory, string comparisonDirectory)
         {
             var logger = new DualLoggerService(typeof(Program));
             var result = new ProcessingResult();
@@ -112,95 +128,14 @@ namespace DataFixter
             {
                 logger.LogOperationStart("批量处理", $"待处理目录：{processedDirectory}，对比目录：{comparisonDirectory}");
 
-                // 步骤1: 读取Excel文件
-                logger.ShowStep("步骤1: 读取Excel文件...");
-                var excelReader = new ExcelBatchReader(processedDirectory, Log.ForContext<ExcelBatchReader>());
-                var processedResults = excelReader.ReadAllFiles();
+                // 创建批量处理服务
+                var batchProcessor = new BatchProcessingService(logger);
                 
-                var comparisonReader = new ExcelBatchReader(comparisonDirectory, Log.ForContext<ExcelBatchReader>());
-                var comparisonResults = comparisonReader.ReadAllFiles();
+                // 执行批量处理
+                result = batchProcessor.ProcessBatch(processedDirectory, comparisonDirectory);
 
-                logger.ShowComplete($"读取完成: 待处理文件 {processedResults.Count} 个, 对比文件 {comparisonResults.Count} 个");
-
-                // 步骤2: 数据标准化
-                logger.ShowStep("步骤2: 数据标准化...");
-                var normalizer = new DataNormalizer(Log.ForContext<DataNormalizer>());
-                var normalizedData = normalizer.NormalizeData(processedResults);
-                var normalizedComparisonData = normalizer.NormalizeData(comparisonResults);
-
-                logger.ShowComplete($"标准化完成: 待处理数据 {normalizedData.Count} 条, 对比数据 {normalizedComparisonData.Count} 条");
-
-                // 步骤3: 数据分组和排序
-                Console.WriteLine("步骤3: 数据分组和排序...");
-                var groupingService = new DataGroupingService(Log.ForContext<DataGroupingService>());
-                var monitoringPoints = groupingService.GroupByPointName(normalizedData);
-                groupingService.SortAllPointsByTime(monitoringPoints);
-
-                Console.WriteLine($"  分组完成: 监测点 {monitoringPoints.Count} 个");
-
-                // 步骤4: 数据验证
-                Console.WriteLine("步骤4: 数据验证...");
-                
-                // 创建配置服务并获取验证选项
-                var configService = new ConfigurationService(Log.ForContext<ConfigurationService>());
-                var validationOptions = configService.GetValidationOptions();
-                
-                var validationService = new DataValidationService(Log.ForContext<DataValidationService>(), validationOptions);
-                var validationResults = validationService.ValidateAllPoints(monitoringPoints, normalizedComparisonData);
-
-                var validCount = validationResults.Count(v => v.Status == ValidationStatus.Valid);
-                var invalidCount = validationResults.Count(v => v.Status == ValidationStatus.Invalid);
-                var needsAdjustmentCount = validationResults.Count(v => v.Status == ValidationStatus.NeedsAdjustment);
-                var canAdjustmentCount = validationResults.Count(v => v.CanAdjustment);
-
-                Console.WriteLine($"  验证完成: 通过 {validCount} 条, 失败 {invalidCount} 条, 需要修正 {needsAdjustmentCount} 条, 可以修正 {canAdjustmentCount} 条");
-
-                // 步骤5: 数据修正
-                Console.WriteLine("步骤5: 数据修正...");
-                
-                // 获取修正选项
-                var correctionOptions = configService.GetCorrectionOptions();
-                
-                var correctionService = new DataCorrectionService(Log.ForContext<DataCorrectionService>(), correctionOptions);
-                var correctionResult = correctionService.CorrectAllPoints(monitoringPoints, validationResults);
-
-                Console.WriteLine($"  修正完成: 修正 {correctionResult.AdjustmentRecords.Count} 条记录");
-
-                // 步骤5.5: 修正后重新验证数据
-                Console.WriteLine("步骤5.5: 修正后重新验证数据...");
-                var correctedValidationResults = correctionService.ValidateCorrectedMonitoringPoints(monitoringPoints);
-                
-                var correctedValidCount = correctedValidationResults.Count(v => v.Status == ValidationStatus.Valid);
-                var correctedInvalidCount = correctedValidationResults.Count(v => v.Status == ValidationStatus.Invalid);
-                
-                Console.WriteLine($"  修正后验证: 通过 {correctedValidCount} 条, 失败 {correctedInvalidCount} 条");
-
-                // 步骤6: 生成输出文件
-                Console.WriteLine("步骤6: 生成输出文件...");
-                var outputDirectory = Path.Combine(processedDirectory, "修正后");
-                
-                // 获取输出选项
-                var outputOptions = configService.GetOutputOptions();
-                
-                var outputService = new ExcelOutputService(Log.ForContext<ExcelOutputService>(), outputOptions);
-
-                var outputResult = outputService.GenerateCorrectedExcelFiles(monitoringPoints, outputDirectory, processedDirectory);
-                var reportResult = outputService.GenerateCorrectionReport(correctionResult, validationResults, outputDirectory);
-
-                Console.WriteLine($"  输出完成: 生成文件 {outputResult.FileResults.Count} 个, 报告 {reportResult.Status}");
-
-                // 更新结果
-                result.Status = ProcessingStatus.Success;
-                result.Message = "批量处理完成";
-                result.ProcessedFiles = processedResults.Count;
-                result.ComparisonFiles = comparisonResults.Count;
-                result.MonitoringPoints = monitoringPoints.Count;
-                result.ValidationResults = validationResults;
-                result.CorrectionResult = correctionResult;
-                result.OutputResult = outputResult;
-                result.ReportResult = reportResult;
-
-                logger.LogOperationComplete("批量处理", "成功完成", $"处理文件：{processedResults.Count}个，监测点：{monitoringPoints.Count}个，修正记录：{correctionResult.AdjustmentRecords.Count}条");
+                logger.LogOperationComplete("批量处理", "成功完成", 
+                    $"处理文件：{result.ProcessedFiles}个，监测点：{result.MonitoringPoints}个，修正记录：{result.CorrectionResult?.AdjustmentRecords.Count ?? 0}条");
             }
             catch (Exception ex)
             {
@@ -214,383 +149,36 @@ namespace DataFixter
         }
 
         /// <summary>
-        /// 测试修正算法
+        /// 显示处理结果
         /// </summary>
-        private static void TestCorrectionAlgorithm()
+        /// <param name="result">处理结果</param>
+        private static void ShowProcessingResults(ProcessingResult result)
         {
-            Console.WriteLine("=== 测试修正算法 ===");
-            
-            // 创建测试数据 - 包含需要双重修正的情况
-            var testPoint = new MonitoringPoint
-            {
-                PointName = "测试点1",
-                PeriodDataList = new List<PeriodData>
-                {
-                    // 第0期：基准期
-                    new PeriodData
-                    {
-                        RowNumber = 1,
-                        CurrentPeriodX = 0.0,
-                        CurrentPeriodY = 0.0,
-                        CurrentPeriodZ = 0.0,
-                        CumulativeX = 0.0,
-                        CumulativeY = 0.0,
-                        CumulativeZ = 0.0,
-                        FileInfo = new DataFixter.Models.ExcelFileInfo("test_2025.1.1-00测试.xls", 1024, DateTime.Now.AddDays(-2))
-                    },
-                    // 第1期：本期变化量和累计值都有问题，需要双重修正
-                    new PeriodData
-                    {
-                        RowNumber = 2,
-                        CurrentPeriodX = 2.5, // 超出1.0限制
-                        CurrentPeriodY = 1.8, // 超出1.0限制
-                        CurrentPeriodZ = 1.2, // 超出1.0限制
-                        CumulativeX = 1.2,   // 错误：应该是 0.0 + 2.5 = 2.5
-                        CumulativeY = 0.8,   // 错误：应该是 0.0 + 1.8 = 1.8
-                        CumulativeZ = 0.5,   // 错误：应该是 0.0 + 1.2 = 1.2
-                        FileInfo = new DataFixter.Models.ExcelFileInfo("test_2025.1.2-00测试.xls", 1024, DateTime.Now.AddDays(-1))
-                    },
-                    // 第2期：本期变化量和累计值都有问题，需要双重修正
-                    new PeriodData
-                    {
-                        RowNumber = 3,
-                        CurrentPeriodX = 1.8, // 超出1.0限制
-                        CurrentPeriodY = 1.5, // 超出1.0限制
-                        CurrentPeriodZ = 1.1, // 超出1.0限制
-                        CumulativeX = 2.1,   // 错误：应该是 2.5 + 1.8 = 4.3
-                        CumulativeY = 1.4,   // 错误：应该是 1.8 + 1.5 = 3.3
-                        CumulativeZ = 0.9,   // 错误：应该是 1.2 + 1.1 = 2.3
-                        FileInfo = new DataFixter.Models.ExcelFileInfo("test_2025.1.3-00测试.xls", 1024, DateTime.Now)
-                    }
-                }
-            };
-            
-            var testPoints = new List<MonitoringPoint> { testPoint };
-
-            // 创建配置选项 - 使用更严格的值来测试修正逻辑
-            var options = new Services.CorrectionOptions
-            {
-                CumulativeTolerance = 0.1,  // 使用配置文件中的值
-                MaxCurrentPeriodValue = 1.0, // 使用更严格的值，使测试数据能够触发修正
-                MaxCumulativeValue = 10.0    // 使用配置文件中的值
-            };
-
-            // 创建数据修正服务
-            var logger = Log.ForContext<Services.DataCorrectionService>();
-            var correctionService = new Services.DataCorrectionService(logger, options);
-
-            Console.WriteLine("修正前数据:");
-            for (int i = 0; i < testPoint.PeriodDataCount; i++)
-            {
-                var data = testPoint.PeriodDataList[i];
-                Console.WriteLine($"第{i}期: X本期={data.CurrentPeriodX:F3}, X累计={data.CumulativeX:F3}");
-                Console.WriteLine($"        Y本期={data.CurrentPeriodY:F3}, Y累计={data.CumulativeY:F3}");
-                Console.WriteLine($"        Z本期={data.CurrentPeriodZ:F3}, Z累计={data.CumulativeZ:F3}");
-            }
-
-            // 创建模拟的验证结果（标记需要修正的数据）
-            var validationResults = new List<ValidationResult>
-            {
-                new ValidationResult
-                {
-                    PointName = "测试点1",
-                    Status = ValidationStatus.Invalid,
-                    ValidationType = "累计值关系验证",
-                    Description = "第1期本期变化量与累计值不一致"
-                },
-                new ValidationResult
-                {
-                    PointName = "测试点1",
-                    Status = ValidationStatus.Invalid,
-                    ValidationType = "累计值关系验证",
-                    Description = "第2期累计值计算错误"
-                }
-            };
-
-            // 执行修正 - 使用正确的方法
-            var result = correctionService.CorrectAllPoints(testPoints, validationResults);
-            Console.WriteLine($"\n修正结果: {result.Status}, 修正数量: {result.AdjustmentRecords.Count}");
-
-            Console.WriteLine("\n修正后数据:");
-            for (int i = 0; i < testPoint.PeriodDataCount; i++)
-            {
-                var data = testPoint.PeriodDataList[i];
-                Console.WriteLine($"第{i}期: X本期={data.CurrentPeriodX:F3}, X累计={data.CumulativeX:F3}");
-                Console.WriteLine($"        Y本期={data.CurrentPeriodY:F3}, Y累计={data.CumulativeY:F3}");
-                Console.WriteLine($"        Z本期={data.CurrentPeriodZ:F3}, Z累计={data.CumulativeZ:F3}");
-            }
-
-            // 验证修正后的数据
-            var validationResult = correctionService.ValidateCorrectedData(testPoint.PeriodDataList);
-            Console.WriteLine($"\n验证结果: {validationResult.Status}");
-            if (validationResult.Status == ValidationStatus.Invalid)
-            {
-                Console.WriteLine("验证失败，错误详情:");
-                foreach (var error in validationResult.ErrorDetails)
-                {
-                    Console.WriteLine($"  - {error}");
-                }
-            }
-            else
-            {
-                Console.WriteLine("验证通过！所有数据都满足累计值关系。");
-            }
-            
-            // 输出修正详情
-            Console.WriteLine("\n=== 修正详情 ===");
-            foreach (var pointResult in result.PointResults)
-            {
-                Console.WriteLine($"监测点: {pointResult.PointName} - {pointResult.Status} - {pointResult.Message}");
-                if (pointResult.Corrections.Any())
-                {
-                    foreach (var correction in pointResult.Corrections)
-                    {
-                        Console.WriteLine($"  修正: {correction.Direction}方向 {correction.CorrectionType} - {correction.OriginalValue:F6} -> {correction.CorrectedValue:F6}");
-                        Console.WriteLine($"  原因: {correction.Reason}");
-                    }
-                }
-            }
-        }
-
-        // 转换方法已移除，使用DataNormalizer.NormalizeData替代
-
-        /// <summary>
-        /// 测试数据验证服务
-        /// </summary>
-        static void TestDataValidationService()
-        {
-            var logger = Log.ForContext<Program>();
-            logger.Information("开始测试数据验证服务...");
-
-            try
-            {
-                // 创建测试数据
-                var monitoringPoints = CreateTestMonitoringPoints();
-                var comparisonData = CreateTestComparisonData();
-
-                // 创建数据验证服务
-                var validationService = new DataValidationService(Log.ForContext<DataValidationService>());
-
-                // 执行验证
-                var validationResults = validationService.ValidateAllPoints(monitoringPoints, comparisonData);
-
-                // 获取统计信息
-                var statistics = validationService.GetValidationStatistics(validationResults);
-
-                // 输出结果
-                Console.WriteLine("验证完成，结果统计:");
-                Console.WriteLine(statistics.GetSummary());
-                Console.WriteLine(statistics.GetDetailedInfo());
-
-                // 输出验证结果详情
-                foreach (var result in validationResults.Take(5)) // 只显示前5个结果
-                {
-                    Console.WriteLine($"验证结果: {result.GetSummary()}");
-                }
-
-                logger.Information("数据验证服务测试完成");
-            }
-            catch (Exception ex)
-            {
-                logger.Error(ex, "测试数据验证服务时发生异常");
-            }
+            Console.WriteLine("=== 处理完成 ===");
+            Console.WriteLine(result.GetSummary());
+            Console.WriteLine();
+            Console.WriteLine("详细报告已生成到输出目录");
+            Console.WriteLine();
+            Console.WriteLine("=== 验证修正结果 ===");
+            Console.WriteLine("1. 检查 '修正后' 目录中的Excel文件");
+            Console.WriteLine("2. 对比原始文件和修正后文件的数据");
+            Console.WriteLine("3. 查看 '修正详细报告.txt' 了解具体修正内容");
+            Console.WriteLine("4. 如果文件大小相同，这是正常的Excel格式特性");
+            Console.WriteLine("5. 重点检查列3-8的数据是否已按修正逻辑更新");
         }
 
         /// <summary>
-        /// 创建测试用的监测点数据
+        /// 显示使用说明
         /// </summary>
-        /// <returns>监测点列表</returns>
-        private static List<MonitoringPoint> CreateTestMonitoringPoints()
+        private static void ShowUsage()
         {
-            var points = new List<MonitoringPoint>();
-
-            // 创建第一个监测点（有错误的累计变化量计算）
-            var point1 = new MonitoringPoint("测试点1", 100.50);
-            
-            var period1 = new PeriodData
-            {
-                FileInfo = new Models.ExcelFileInfo("test1.xls", 1024, DateTime.Now),
-                RowNumber = 5,
-                PointName = "测试点1",
-                Mileage = 100.50,
-                CurrentPeriodX = 0.001,
-                CurrentPeriodY = 0.002,
-                CurrentPeriodZ = 0.003,
-                CumulativeX = 0.001,
-                CumulativeY = 0.002,
-                CumulativeZ = 0.003,
-                DailyX = 0.0001,
-                DailyY = 0.0002,
-                DailyZ = 0.0003
-            };
-
-            var period2 = new PeriodData
-            {
-                FileInfo = new Models.ExcelFileInfo("test2.xls", 1024, DateTime.Now.AddDays(1)),
-                RowNumber = 5,
-                PointName = "测试点1",
-                Mileage = 100.50,
-                CurrentPeriodX = 0.002,
-                CurrentPeriodY = 0.003,
-                CurrentPeriodZ = 0.004,
-                CumulativeX = 0.005, // 错误：应该是 0.001 + 0.002 = 0.003
-                CumulativeY = 0.005, // 正确：0.002 + 0.003 = 0.005
-                CumulativeZ = 0.010, // 错误：应该是 0.003 + 0.004 = 0.007
-                DailyX = 0.0002,
-                DailyY = 0.0003,
-                DailyZ = 0.0004
-            };
-
-            point1.AddPeriodData(period1);
-            point1.AddPeriodData(period2);
-            points.Add(point1);
-
-            // 创建第二个监测点（完全正确）
-            var point2 = new MonitoringPoint("测试点2", 200.75);
-            
-            var period3 = new PeriodData
-            {
-                FileInfo = new Models.ExcelFileInfo("test1.xls", 1024, DateTime.Now),
-                RowNumber = 6,
-                PointName = "测试点2",
-                Mileage = 200.75,
-                CurrentPeriodX = 0.004,
-                CurrentPeriodY = 0.005,
-                CurrentPeriodZ = 0.006,
-                CumulativeX = 0.004,
-                CumulativeY = 0.005,
-                CumulativeZ = 0.006,
-                DailyX = 0.0004,
-                DailyY = 0.0005,
-                DailyZ = 0.0006
-            };
-
-            point2.AddPeriodData(period3);
-            points.Add(point2);
-
-            return points;
-        }
-
-        /// <summary>
-        /// 测试数据修正服务
-        /// </summary>
-        static void TestDataCorrectionService()
-        {
-            var logger = Log.ForContext<Program>();
-            logger.Information("开始测试数据修正服务...");
-
-            try
-            {
-                // 创建测试数据
-                var monitoringPoints = CreateTestMonitoringPoints();
-                var comparisonData = CreateTestComparisonData();
-
-                // 创建数据验证服务
-                var validationService = new DataValidationService(Log.ForContext<DataValidationService>());
-
-                // 执行验证
-                var validationResults = validationService.ValidateAllPoints(monitoringPoints, comparisonData);
-
-                // 创建数据修正服务
-                var correctionService = new DataCorrectionService(Log.ForContext<DataCorrectionService>());
-
-                // 执行修正
-                var correctionResult = correctionService.CorrectAllPoints(monitoringPoints, validationResults);
-
-                // 获取统计信息
-                var statistics = correctionService.GetCorrectionStatistics();
-
-                // 输出结果
-                Console.WriteLine("\n=== 数据修正结果 ===");
-                Console.WriteLine(correctionResult.GetSummary());
-
-                // 输出修正详情
-                foreach (var pointResult in correctionResult.PointResults.Take(5)) // 只显示前5个结果
-                {
-                    Console.WriteLine($"修正结果: {pointResult.PointName} - {pointResult.Status} - {pointResult.Message}");
-                    if (pointResult.Corrections.Any())
-                    {
-                        foreach (var correction in pointResult.Corrections.Take(3)) // 只显示前3个修正
-                        {
-                            Console.WriteLine($"  修正: {correction.Direction}方向 {correction.CorrectionType} - {correction.OriginalValue:F6} -> {correction.CorrectedValue:F6}");
-                        }
-                    }
-                }
-
-                // 输出修正统计
-                Console.WriteLine($"\n修正统计: 总计{statistics.TotalAdjustments}次修正, 涉及{statistics.TotalPoints}个监测点, {statistics.TotalFiles}个文件");
-
-                logger.Information("数据修正服务测试完成");
-            }
-            catch (Exception ex)
-            {
-                logger.Error(ex, "测试数据修正服务时发生异常");
-            }
-        }
-
-        /// <summary>
-        /// 创建测试用的对比数据
-        /// </summary>
-        /// <returns>对比数据列表</returns>
-        private static List<PeriodData> CreateTestComparisonData()
-        {
-            var data = new List<PeriodData>();
-
-            // 对比数据1
-            data.Add(new PeriodData
-            {
-                FileInfo = new Models.ExcelFileInfo("comparison1.xls", 1024, DateTime.Now),
-                RowNumber = 5,
-                PointName = "测试点1",
-                Mileage = 100.50,
-                CurrentPeriodX = 0.001,
-                CurrentPeriodY = 0.002,
-                CurrentPeriodZ = 0.003,
-                CumulativeX = 0.001,
-                CumulativeY = 0.002,
-                CumulativeZ = 0.003,
-                DailyX = 0.0001,
-                DailyY = 0.0002,
-                DailyZ = 0.0003
-            });
-
-            // 对比数据2
-            data.Add(new PeriodData
-            {
-                FileInfo = new Models.ExcelFileInfo("comparison2.xls", 1024, DateTime.Now),
-                RowNumber = 6,
-                PointName = "测试点2",
-                Mileage = 200.75,
-                CurrentPeriodX = 0.004,
-                CurrentPeriodY = 0.005,
-                CurrentPeriodZ = 0.006,
-                CumulativeX = 0.004,
-                CumulativeY = 0.005,
-                CumulativeZ = 0.006,
-                DailyX = 0.0004,
-                DailyY = 0.0005,
-                DailyZ = 0.0006
-            });
-
-            // 对比数据3（空数据，用于测试对比数据为空的情况）
-            data.Add(new PeriodData
-            {
-                FileInfo = new Models.ExcelFileInfo("comparison3.xls", 1024, DateTime.Now),
-                RowNumber = 7,
-                PointName = "测试点3",
-                Mileage = 300.00,
-                CurrentPeriodX = 0.0,
-                CurrentPeriodY = 0.0,
-                CurrentPeriodZ = 0.0,
-                CumulativeX = 0.0,
-                CumulativeY = 0.0,
-                CumulativeZ = 0.0,
-                DailyX = 0.0,
-                DailyY = 0.0,
-                DailyZ = 0.0
-            });
-
-            return data;
+            Console.WriteLine("使用方法:");
+            Console.WriteLine("DataFixter <待处理目录> <对比目录>");
+            Console.WriteLine();
+            Console.WriteLine("参数说明:");
+            Console.WriteLine("  待处理目录: 包含需要修正的Excel文件的目录");
+            Console.WriteLine("  对比目录: 包含对比数据的Excel文件的目录");
+            Console.WriteLine();
         }
     }
 }
