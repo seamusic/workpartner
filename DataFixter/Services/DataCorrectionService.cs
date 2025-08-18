@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using DataFixter.Models;
+using DataFixter.Utils;
 using Microsoft.Extensions.Logging;
 
 namespace DataFixter.Services
@@ -334,8 +335,8 @@ namespace DataFixter.Services
             var needsCorrection = false;
             for (int i = 1; i < sortedData.Count; i++)
             {
-                var difference = Math.Abs(expectedCumulatives[i] - actualCumulatives[i]);
-                if (difference > _options.CumulativeTolerance)
+                var difference = FloatingPointUtils.SafeAbsoluteDifference(expectedCumulatives[i], actualCumulatives[i]);
+                if (FloatingPointUtils.IsGreaterThan(difference, _options.CumulativeTolerance, _options.CumulativeTolerance))
                 {
                     needsCorrection = true;
                     break;
@@ -351,15 +352,15 @@ namespace DataFixter.Services
             for (int i = 1; i < sortedData.Count; i++)
             {
                 var current = sortedData[i];
-                var difference = Math.Abs(expectedCumulatives[i] - actualCumulatives[i]);
+                var difference = FloatingPointUtils.SafeAbsoluteDifference(expectedCumulatives[i], actualCumulatives[i]);
 
-                if (difference > _options.CumulativeTolerance)
+                if (FloatingPointUtils.IsGreaterThan(difference, _options.CumulativeTolerance, _options.CumulativeTolerance))
                 {
                     var originalCumulative = actualCumulatives[i];
                     var correctedCumulative = expectedCumulatives[i];
 
                     // 检查修正后的累计值是否在合理范围内
-                    if (Math.Abs(correctedCumulative) <= _options.MaxCumulativeValue)
+                    if (FloatingPointUtils.IsLessThanOrEqual(FloatingPointUtils.SafeAbs(correctedCumulative), _options.MaxCumulativeValue, _options.CumulativeTolerance))
                     {
                         var correction = new DataCorrection
                         {
@@ -385,8 +386,8 @@ namespace DataFixter.Services
                         var maxAllowedCumulative = _options.MaxCumulativeValue * Math.Sign(correctedCumulative);
                         var adjustedPeriodValue = maxAllowedCumulative - expectedCumulatives[i - 1];
 
-                        // 检查调整后的本期变化量是否合理
-                        if (Math.Abs(adjustedPeriodValue) <= _options.MaxCurrentPeriodValue)
+                                            // 检查调整后的本期变化量是否合理
+                    if (FloatingPointUtils.IsLessThanOrEqual(FloatingPointUtils.SafeAbs(adjustedPeriodValue), _options.MaxCurrentPeriodValue, _options.CumulativeTolerance))
                         {
                             var correction = new DataCorrection
                             {
@@ -488,12 +489,13 @@ namespace DataFixter.Services
             var originalCumulatives = sortedData.Skip(1).Select(pd => GetDirectionValue(pd, direction).cumulativeValue).ToList();
 
             // 计算原始数据的统计特征
-            var avgPeriodValue = originalValues.Any() ? originalValues.Average() : 0.0;
-            var stdPeriodValue = originalValues.Any() ? Math.Sqrt(originalValues.Select(v => Math.Pow(v - avgPeriodValue, 2)).Average()) : 1.0;
-            var maxPeriodValue = originalValues.Any() ? Math.Max(Math.Abs(originalValues.Max()), Math.Abs(originalValues.Min())) : 2.0;
+            var avgPeriodValue = originalValues.Any() ? FloatingPointUtils.SafeAverage(originalValues.ToArray()) : 0.0;
+            var stdPeriodValue = originalValues.Any() ? FloatingPointUtils.SafeStandardDeviation(originalValues.ToArray()) : 1.0;
+            var maxPeriodValue = originalValues.Any() ? FloatingPointUtils.SafeMax(FloatingPointUtils.SafeAbs(originalValues.Max()), FloatingPointUtils.SafeAbs(originalValues.Min())) : 2.0;
 
             // 确保标准差不为0
-            if (stdPeriodValue < 0.1) stdPeriodValue = maxPeriodValue * 0.3;
+            if (FloatingPointUtils.IsLessThan(stdPeriodValue, 0.1, _options.CumulativeTolerance)) 
+                stdPeriodValue = maxPeriodValue * 0.3;
 
             var random = new Random();
 
@@ -516,27 +518,27 @@ namespace DataFixter.Services
                     {
                         // 如果尝试次数过多，使用安全的默认值
                         _logger.LogWarning($"监测点 {pointName} {direction}方向生成值失败，使用安全默认值");
-                        newPeriodValue = Math.Sign(avgPeriodValue) * Math.Max(0.1, Math.Abs(avgPeriodValue));
+                        newPeriodValue = FloatingPointUtils.SafeSign(avgPeriodValue) * FloatingPointUtils.SafeMax(0.1, FloatingPointUtils.SafeAbs(avgPeriodValue));
                         break;
                     }
 
                     // 使用Box-Muller变换生成正态分布随机数
                     var u1 = random.NextDouble();
                     var u2 = random.NextDouble();
-                    var z0 = Math.Sqrt(-2.0 * Math.Log(u1)) * Math.Cos(2.0 * Math.PI * u2);
+                    var z0 = FloatingPointUtils.SafeSqrt(-2.0 * FloatingPointUtils.SafeLog(u1)) * FloatingPointUtils.SafeCos(2.0 * Math.PI * u2);
 
                     // 基于原始数据的均值和标准差生成值
-                    newPeriodValue = Math.Round(avgPeriodValue + z0 * stdPeriodValue, 6);
+                    newPeriodValue = FloatingPointUtils.SafeRound(avgPeriodValue + z0 * stdPeriodValue, 6);
 
                     // 限制在原始数据最大值的2倍范围内
-                    var maxAllowed = Math.Max(maxPeriodValue * 2.0, 1.0);
-                    if (Math.Abs(newPeriodValue) > maxAllowed)
+                    var maxAllowed = FloatingPointUtils.SafeMax(maxPeriodValue * 2.0, 1.0);
+                    if (FloatingPointUtils.IsGreaterThan(FloatingPointUtils.SafeAbs(newPeriodValue), maxAllowed, _options.CumulativeTolerance))
                     {
-                        newPeriodValue = Math.Sign(newPeriodValue) * maxAllowed;
+                        newPeriodValue = FloatingPointUtils.SafeSign(newPeriodValue) * maxAllowed;
                     }
 
                     // 确保生成的值不会过小，但也要避免无限循环
-                    if (Math.Abs(newPeriodValue) >= 0.001)
+                    if (FloatingPointUtils.IsGreaterThanOrEqual(FloatingPointUtils.SafeAbs(newPeriodValue), 0.001, _options.CumulativeTolerance))
                     {
                         break; // 满足条件，退出循环
                     }
@@ -549,23 +551,23 @@ namespace DataFixter.Services
                 } while (true); // 改为无限循环，通过break控制退出
 
                 // 正确计算累计值：前一期累计值 + 本期变化量
-                var newCumulative = Math.Round(currentCumulative + newPeriodValue, 6);
+                var newCumulative = FloatingPointUtils.SafeRound(currentCumulative + newPeriodValue, 6);
 
                 // 检查累计值是否在合理范围内
-                if (Math.Abs(newCumulative) > _options.MaxCumulativeValue)
+                if (FloatingPointUtils.IsGreaterThan(FloatingPointUtils.SafeAbs(newCumulative), _options.MaxCumulativeValue, _options.CumulativeTolerance))
                 {
                     // 如果超出范围，调整本期变化量使其在范围内
                     var maxAllowedCumulative = _options.MaxCumulativeValue;
                     var minAllowedCumulative = -_options.MaxCumulativeValue;
 
-                    if (newCumulative > maxAllowedCumulative)
+                    if (FloatingPointUtils.IsGreaterThan(newCumulative, maxAllowedCumulative, _options.CumulativeTolerance))
                     {
-                        newPeriodValue = Math.Round(maxAllowedCumulative - currentCumulative, 6);
+                        newPeriodValue = FloatingPointUtils.SafeRound(maxAllowedCumulative - currentCumulative, 6);
                         newCumulative = maxAllowedCumulative;
                     }
                     else
                     {
-                        newPeriodValue = Math.Round(minAllowedCumulative - currentCumulative, 6);
+                        newPeriodValue = FloatingPointUtils.SafeRound(minAllowedCumulative - currentCumulative, 6);
                         newCumulative = minAllowedCumulative;
                     }
                 }
@@ -948,19 +950,19 @@ namespace DataFixter.Services
                     var previous = sortedData[i - 1];
 
                     // 检查本期变化量是否超出限制
-                    if (Math.Abs(current.CurrentPeriodX) > _options.MaxCurrentPeriodValue)
+                    if (FloatingPointUtils.IsGreaterThan(FloatingPointUtils.SafeAbs(current.CurrentPeriodX), _options.MaxCurrentPeriodValue, _options.CumulativeTolerance))
                     {
                         result.SetFailure($"第{i}期X方向本期变化量超出限制: {current.CurrentPeriodX:F6} > {_options.MaxCurrentPeriodValue:F6}");
                         return result;
                     }
 
-                    if (Math.Abs(current.CurrentPeriodY) > _options.MaxCurrentPeriodValue)
+                    if (FloatingPointUtils.IsGreaterThan(FloatingPointUtils.SafeAbs(current.CurrentPeriodY), _options.MaxCurrentPeriodValue, _options.CumulativeTolerance))
                     {
                         result.SetFailure($"第{i}期Y方向本期变化量超出限制: {current.CurrentPeriodY:F6} > {_options.MaxCurrentPeriodValue:F6}");
                         return result;
                     }
 
-                    if (Math.Abs(current.CurrentPeriodZ) > _options.MaxCurrentPeriodValue)
+                    if (FloatingPointUtils.IsGreaterThan(FloatingPointUtils.SafeAbs(current.CurrentPeriodZ), _options.MaxCurrentPeriodValue, _options.CumulativeTolerance))
                     {
                         result.SetFailure($"第{i}期Z方向本期变化量超出限制: {current.CurrentPeriodZ:F6} > {_options.MaxCurrentPeriodValue:F6}");
                         return result;
@@ -969,9 +971,9 @@ namespace DataFixter.Services
                     // 验证X方向：累计值 = 上期累计值 + 本期变化量
                     var expectedCumulativeX = previous.CumulativeX + current.CurrentPeriodX;
                     var actualCumulativeX = current.CumulativeX;
-                    var xDifference = Math.Abs(expectedCumulativeX - actualCumulativeX);
+                    var xDifference = FloatingPointUtils.SafeAbsoluteDifference(expectedCumulativeX, actualCumulativeX);
 
-                    if (xDifference > _options.CumulativeTolerance)
+                    if (FloatingPointUtils.IsGreaterThan(xDifference, _options.CumulativeTolerance, _options.CumulativeTolerance))
                     {
                         result.SetFailure($"第{i}期X方向数据不一致: 期望累计值={expectedCumulativeX:F6}, 实际累计值={actualCumulativeX:F6}, 差异={xDifference:F6}");
                         return result;
@@ -980,9 +982,9 @@ namespace DataFixter.Services
                     // 验证Y方向
                     var expectedCumulativeY = previous.CumulativeY + current.CurrentPeriodY;
                     var actualCumulativeY = current.CumulativeY;
-                    var yDifference = Math.Abs(expectedCumulativeY - actualCumulativeY);
+                    var yDifference = FloatingPointUtils.SafeAbsoluteDifference(expectedCumulativeY, actualCumulativeY);
 
-                    if (yDifference > _options.CumulativeTolerance)
+                    if (FloatingPointUtils.IsGreaterThan(yDifference, _options.CumulativeTolerance, _options.CumulativeTolerance))
                     {
                         result.SetFailure($"第{i}期Y方向数据不一致: 期望累计值={expectedCumulativeY:F6}, 实际累计值={actualCumulativeY:F6}, 差异={yDifference:F6}");
                         return result;
@@ -991,9 +993,9 @@ namespace DataFixter.Services
                     // 验证Z方向
                     var expectedCumulativeZ = previous.CumulativeZ + current.CurrentPeriodZ;
                     var actualCumulativeZ = current.CumulativeZ;
-                    var zDifference = Math.Abs(expectedCumulativeZ - actualCumulativeZ);
+                    var zDifference = FloatingPointUtils.SafeAbsoluteDifference(expectedCumulativeZ, actualCumulativeZ);
 
-                    if (zDifference > _options.CumulativeTolerance)
+                    if (FloatingPointUtils.IsGreaterThan(zDifference, _options.CumulativeTolerance, _options.CumulativeTolerance))
                     {
                         result.SetFailure($"第{i}期Z方向数据不一致: 期望累计值={expectedCumulativeZ:F6}, 实际累计值={actualCumulativeZ:F6}, 差异={zDifference:F6}");
                         return result;
@@ -1034,9 +1036,9 @@ namespace DataFixter.Services
                     // 验证X方向
                     var expectedCumulativeX = previous.CumulativeX + current.CurrentPeriodX;
                     var actualCumulativeX = current.CumulativeX;
-                    var xDifference = Math.Abs(expectedCumulativeX - actualCumulativeX);
+                    var xDifference = FloatingPointUtils.SafeAbsoluteDifference(expectedCumulativeX, actualCumulativeX);
 
-                    if (xDifference > _options.CumulativeTolerance)
+                    if (FloatingPointUtils.IsGreaterThan(xDifference, _options.CumulativeTolerance, _options.CumulativeTolerance))
                     {
                         result.SetFailure($"第{i}期X方向数据不一致: 期望累计值={expectedCumulativeX:F6}, 实际累计值={actualCumulativeX:F6}, 差异={xDifference:F6}");
                         result.AddFailedValue($"第{i}期X累计值", actualCumulativeX);
@@ -1046,9 +1048,9 @@ namespace DataFixter.Services
                     // 验证Y方向
                     var expectedCumulativeY = previous.CumulativeY + current.CurrentPeriodY;
                     var actualCumulativeY = current.CumulativeY;
-                    var yDifference = Math.Abs(expectedCumulativeY - actualCumulativeY);
+                    var yDifference = FloatingPointUtils.SafeAbsoluteDifference(expectedCumulativeY, actualCumulativeY);
 
-                    if (yDifference > _options.CumulativeTolerance)
+                    if (FloatingPointUtils.IsGreaterThan(yDifference, _options.CumulativeTolerance, _options.CumulativeTolerance))
                     {
                         result.SetFailure($"第{i}期Y方向数据不一致: 期望累计值={expectedCumulativeY:F6}, 实际累计值={actualCumulativeY:F6}, 差异={yDifference:F6}");
                         result.AddFailedValue($"第{i}期Y累计值", actualCumulativeY);
@@ -1058,9 +1060,9 @@ namespace DataFixter.Services
                     // 验证Z方向
                     var expectedCumulativeZ = previous.CumulativeZ + current.CurrentPeriodZ;
                     var actualCumulativeZ = current.CumulativeZ;
-                    var zDifference = Math.Abs(expectedCumulativeZ - actualCumulativeZ);
+                    var zDifference = FloatingPointUtils.SafeAbsoluteDifference(expectedCumulativeZ, actualCumulativeZ);
 
-                    if (zDifference > _options.CumulativeTolerance)
+                    if (FloatingPointUtils.IsGreaterThan(zDifference, _options.CumulativeTolerance, _options.CumulativeTolerance))
                     {
                         result.SetFailure($"第{i}期Z方向数据不一致: 期望累计值={expectedCumulativeZ:F6}, 实际累计值={actualCumulativeZ:F6}, 差异={zDifference:F6}");
                         result.AddFailedValue($"第{i}期Z累计值", actualCumulativeZ);
@@ -1118,41 +1120,41 @@ namespace DataFixter.Services
                         var current = sortedData[i];
                         var previous = sortedData[i - 1];
 
-                        // 验证X方向
-                        var expectedCumulativeX = previous.CumulativeX + current.CurrentPeriodX;
-                        var actualCumulativeX = current.CumulativeX;
-                        var xDifference = Math.Abs(expectedCumulativeX - actualCumulativeX);
+                                            // 验证X方向
+                    var expectedCumulativeX = previous.CumulativeX + current.CurrentPeriodX;
+                    var actualCumulativeX = current.CumulativeX;
+                    var xDifference = FloatingPointUtils.SafeAbsoluteDifference(expectedCumulativeX, actualCumulativeX);
 
-                        if (xDifference > _options.CumulativeTolerance)
-                        {
-                            result.SetFailure($"第{i}期X方向数据不一致: 期望累计值={expectedCumulativeX:F6}, 实际累计值={actualCumulativeX:F6}, 差异={xDifference:F6}");
-                            result.AddFailedValue($"第{i}期X累计值", actualCumulativeX);
-                            result.AddExpectedValue($"第{i}期X累计值", expectedCumulativeX);
-                        }
+                    if (FloatingPointUtils.IsGreaterThan(xDifference, _options.CumulativeTolerance, _options.CumulativeTolerance))
+                    {
+                        result.SetFailure($"第{i}期X方向数据不一致: 期望累计值={expectedCumulativeX:F6}, 实际累计值={actualCumulativeX:F6}, 差异={xDifference:F6}");
+                        result.AddFailedValue($"第{i}期X累计值", actualCumulativeX);
+                        result.AddExpectedValue($"第{i}期X累计值", expectedCumulativeX);
+                    }
 
-                        // 验证Y方向
-                        var expectedCumulativeY = previous.CumulativeY + current.CurrentPeriodY;
-                        var actualCumulativeY = current.CumulativeY;
-                        var yDifference = Math.Abs(expectedCumulativeY - actualCumulativeY);
+                    // 验证Y方向
+                    var expectedCumulativeY = previous.CumulativeY + current.CurrentPeriodY;
+                    var actualCumulativeY = current.CumulativeY;
+                    var yDifference = FloatingPointUtils.SafeAbsoluteDifference(expectedCumulativeY, actualCumulativeY);
 
-                        if (yDifference > _options.CumulativeTolerance)
-                        {
-                            result.SetFailure($"第{i}期Y方向数据不一致: 期望累计值={expectedCumulativeY:F6}, 实际累计值={actualCumulativeY:F6}, 差异={yDifference:F6}");
-                            result.AddFailedValue($"第{i}期Y累计值", actualCumulativeY);
-                            result.AddExpectedValue($"第{i}期Y累计值", expectedCumulativeY);
-                        }
+                    if (FloatingPointUtils.IsGreaterThan(yDifference, _options.CumulativeTolerance, _options.CumulativeTolerance))
+                    {
+                        result.SetFailure($"第{i}期Y方向数据不一致: 期望累计值={expectedCumulativeY:F6}, 实际累计值={actualCumulativeY:F6}, 差异={yDifference:F6}");
+                        result.AddFailedValue($"第{i}期Y累计值", actualCumulativeY);
+                        result.AddExpectedValue($"第{i}期Y累计值", expectedCumulativeY);
+                    }
 
-                        // 验证Z方向
-                        var expectedCumulativeZ = previous.CumulativeZ + current.CurrentPeriodZ;
-                        var actualCumulativeZ = current.CumulativeZ;
-                        var zDifference = Math.Abs(expectedCumulativeZ - actualCumulativeZ);
+                    // 验证Z方向
+                    var expectedCumulativeZ = previous.CumulativeZ + current.CurrentPeriodZ;
+                    var actualCumulativeZ = current.CumulativeZ;
+                    var zDifference = FloatingPointUtils.SafeAbsoluteDifference(expectedCumulativeZ, actualCumulativeZ);
 
-                        if (zDifference > _options.CumulativeTolerance)
-                        {
-                            result.SetFailure($"第{i}期Z方向数据不一致: 期望累计值={expectedCumulativeZ:F6}, 实际累计值={actualCumulativeZ:F6}, 差异={zDifference:F6}");
-                            result.AddFailedValue($"第{i}期Z累计值", actualCumulativeZ);
-                            result.AddExpectedValue($"第{i}期Z累计值", expectedCumulativeZ);
-                        }
+                    if (FloatingPointUtils.IsGreaterThan(zDifference, _options.CumulativeTolerance, _options.CumulativeTolerance))
+                    {
+                        result.SetFailure($"第{i}期Z方向数据不一致: 期望累计值={expectedCumulativeZ:F6}, 实际累计值={actualCumulativeZ:F6}, 差异={zDifference:F6}");
+                        result.AddFailedValue($"第{i}期Z累计值", actualCumulativeZ);
+                        result.AddExpectedValue($"第{i}期Z累计值", expectedCumulativeZ);
+                    }
                     }
 
                     if (result.Status == ValidationStatus.Valid)
@@ -1219,7 +1221,7 @@ namespace DataFixter.Services
             {
                 // 分析该方向的数据特征
                 var directionValues = sortedData.Select(pd => GetDirectionValue(pd, direction))
-                    .Where(v => Math.Abs(v.currentPeriodValue) <= _options.MaxCurrentPeriodValue * 2) // 过滤掉极端异常值
+                    .Where(v => FloatingPointUtils.IsLessThanOrEqual(FloatingPointUtils.SafeAbs(v.currentPeriodValue), _options.MaxCurrentPeriodValue * 2, _options.CumulativeTolerance)) // 过滤掉极端异常值
                     .ToList();
 
                 if (directionValues.Any())
@@ -1248,7 +1250,7 @@ namespace DataFixter.Services
                         currentCumulative += newPeriodValue;
 
                         // 创建修正记录
-                        if (Math.Abs(newPeriodValue - originalPeriodValue) > _options.CumulativeTolerance)
+                        if (FloatingPointUtils.IsGreaterThan(FloatingPointUtils.SafeAbsoluteDifference(newPeriodValue, originalPeriodValue), _options.CumulativeTolerance, _options.CumulativeTolerance))
                         {
                             var correction = new DataCorrection
                             {
@@ -1279,7 +1281,7 @@ namespace DataFixter.Services
                         var newPeriodValue = 0.0;
                         var newCumulative = 0.0;
 
-                        if (Math.Abs(newPeriodValue - originalPeriodValue) > _options.CumulativeTolerance)
+                        if (FloatingPointUtils.IsGreaterThan(FloatingPointUtils.SafeAbsoluteDifference(newPeriodValue, originalPeriodValue), _options.CumulativeTolerance, _options.CumulativeTolerance))
                         {
                             var correction = new DataCorrection
                             {
@@ -1311,9 +1313,9 @@ namespace DataFixter.Services
         {
             if (values.Count <= 1) return 0.0;
 
-            var mean = values.Average();
-            var sumSquaredDiff = values.Sum(x => Math.Pow(x - mean, 2));
-            return Math.Sqrt(sumSquaredDiff / (values.Count - 1));
+            var mean = FloatingPointUtils.SafeAverage(values.ToArray());
+            var sumSquaredDiff = values.Sum(x => FloatingPointUtils.SafePow(x - mean, 2));
+            return FloatingPointUtils.SafeSqrt(sumSquaredDiff / (values.Count - 1));
         }
     }
 
