@@ -19,7 +19,7 @@ namespace DataFixter
 
             try
             {
-                args = new[] { "E:\\workspace\\gmdi\\tools\\WorkPartner\\excel\\processed", "E:\\workspace\\gmdi\\tools\\WorkPartner\\excel" };
+                args = new[] { "E:\\tmp\\02上传成果(1)\\02上传成果\\processed", "E:\\tmp\\02上传成果(1)\\02上传成果" };
                 // 检查命令行参数
                 if (args.Length != 2)
                 {

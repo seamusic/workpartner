@@ -75,6 +75,7 @@ namespace DataFixter.Services
                                 var canFix = currentResult.Any(x => x.PointName == point.PointName && x.CanAdjustment);
                                 if (canFix)
                                 {
+                                    // 仅修正允许修正的区域
                                     var pointResult = CorrectPoint(point);
                                     result.AddPointResult(pointResult);
                                 }
@@ -110,7 +111,7 @@ namespace DataFixter.Services
                         }
 
                         processedPoints++;
-                        if (processedPoints % 10 == 0)
+                        if (processedPoints % 100 == 0)
                         {
                             _logger.LogInformation("已处理 {ProcessedPoints}/{TotalPoints} 个监测点", processedPoints, totalPoints);
                         }
@@ -129,14 +130,59 @@ namespace DataFixter.Services
                 }
 
                 result.AdjustmentRecords = _adjustmentRecords;
-                _logger.LogInformation("数据修正完成: 总计 {TotalPoints} 个监测点, 生成 {RecordCount} 个修正记录",
-                    totalPoints, _adjustmentRecords.Count);
+                //_logger.LogInformation("数据修正完成: 总计 {TotalPoints} 个监测点, 生成 {RecordCount} 个修正记录",
+                //    totalPoints, _adjustmentRecords.Count);
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "修正所有监测点数据时发生异常");
                 result.Status = CorrectionStatus.Error;
                 result.Message = $"修正过程中发生异常: {ex.Message}";
+            }
+
+            return result;
+        }
+
+        public PointCorrectionResult CorrectPointSimple(MonitoringPoint point, List<ValidationResult> results)
+        {
+            var result = new PointCorrectionResult
+            {
+                PointName = point.PointName,
+                Status = CorrectionStatus.Success,
+                Message = "修正完成"
+            };
+
+            try
+            {
+                if (point.PeriodDataCount < 2)
+                {
+                    result.Message = "数据期数不足，无需修正";
+                    return result;
+                }
+
+                // 首先尝试全局分析和修正策略
+                var corrections = ApplyGlobalCorrectionStrategy(point);
+                if (corrections.Any())
+                {
+                    // 应用修正
+                    ApplyCorrections(corrections);
+                    result.CorrectedPeriods = corrections.Select(c => c.PeriodData).Distinct().Count();
+                    result.CorrectedValues = corrections.Count;
+
+                    _logger.LogInformation("监测点 {PointName} 修正完成: {CorrectionCount} 个修正",
+                        point.PointName, result.CorrectedValues);
+                }
+                else
+                {
+                    _logger.LogInformation("{PointName} 没有需要修正的", point.PointName);
+
+                }
+            }
+            catch (Exception ex)
+            {
+                result.Status = CorrectionStatus.Error;
+                result.Message = $"修正过程中发生异常: {ex.Message}";
+                _logger.LogError(ex, "修正监测点 {PointName} 时发生异常", point.PointName);
             }
 
             return result;
@@ -215,16 +261,34 @@ namespace DataFixter.Services
                         {
                             _logger.LogWarning("激进策略后数据仍然无效: {Description}", finalValidation.Description);
 
-                            // 进行最终修正：强制设置所有数据为0或最小值
-                            var finalCorrections = ApplyFinalCorrectionStrategy(point);
-                            if (finalCorrections.Any())
+                            // 检查失败比例，如果低于20%，使用部分修正策略
+                            var failureRatio = CalculateValidationFailureRatio(point, finalValidation);
+                            if (failureRatio < 0.2) // 失败比例低于20%
                             {
-                                // 应用最终修正（不回滚之前的修正）
-                                ApplyCorrections(finalCorrections);
-                                result.CorrectedPeriods = finalCorrections.Select(c => c.PeriodData).Distinct().Count();
-                                result.CorrectedValues = finalCorrections.Count;
+                                _logger.LogInformation("激进策略后失败比例较低 ({FailureRatio:P1})，使用部分修正策略", failureRatio);
+                                var partialCorrections = ApplyPartialCorrectionStrategy(point, finalValidation);
+                                if (partialCorrections.Any())
+                                {
+                                    ApplyCorrections(partialCorrections);
+                                    result.CorrectedPeriods = partialCorrections.Select(c => c.PeriodData).Distinct().Count();
+                                    result.CorrectedValues = partialCorrections.Count;
+                                    _logger.LogInformation("部分修正策略完成，修正了 {Count} 个值", partialCorrections.Count);
+                                }
+                            }
+                            else
+                            {
+                                // 失败比例较高，使用最终修正策略
+                                _logger.LogInformation("激进策略后失败比例较高 ({FailureRatio:P1})，使用最终修正策略", failureRatio);
+                                var finalCorrections = ApplyFinalCorrectionStrategy(point);
+                                if (finalCorrections.Any())
+                                {
+                                    // 应用最终修正（不回滚之前的修正）
+                                    ApplyCorrections(finalCorrections);
+                                    result.CorrectedPeriods = finalCorrections.Select(c => c.PeriodData).Distinct().Count();
+                                    result.CorrectedValues = finalCorrections.Count;
 
-                                _logger.LogInformation("应用最终修正策略完成");
+                                    _logger.LogInformation("应用最终修正策略完成");
+                                }
                             }
                         }
                         else
@@ -1228,6 +1292,223 @@ namespace DataFixter.Services
         }
 
         /// <summary>
+        /// 计算验证失败比例
+        /// </summary>
+        /// <param name="point">监测点</param>
+        /// <param name="validationResult">验证结果</param>
+        /// <returns>失败比例 (0.0 - 1.0)</returns>
+        private double CalculateValidationFailureRatio(MonitoringPoint point, ValidationResult validationResult)
+        {
+            if (validationResult.Status == ValidationStatus.Valid)
+                return 0.0;
+
+            // 计算总的数据项数（3个方向 × 期数）
+            var totalDataItems = point.PeriodDataCount * 3;
+            if (totalDataItems == 0) return 1.0;
+
+            // 从验证结果描述中提取失败信息，估算失败数量
+            // 这里可以根据实际的验证结果格式进行调整
+            var failureCount = EstimateFailureCount(validationResult);
+            return Math.Min(1.0, (double)failureCount / totalDataItems);
+        }
+
+        /// <summary>
+        /// 估算验证失败的数量
+        /// </summary>
+        /// <param name="validationResult">验证结果</param>
+        /// <returns>失败数量</returns>
+        private int EstimateFailureCount(ValidationResult validationResult)
+        {
+            if (string.IsNullOrEmpty(validationResult.Description))
+                return 1;
+
+            // 根据描述中的期数信息估算失败数量
+            var description = validationResult.Description;
+            var failureCount = 0;
+
+            // 简单估算：每个"第X期"表示一个失败
+            for (int i = 1; i <= 100; i++) // 假设最多100期
+            {
+                if (description.Contains($"第{i}期"))
+                    failureCount++;
+            }
+
+            return Math.Max(1, failureCount); // 至少返回1
+        }
+
+        /// <summary>
+        /// 应用部分修正策略
+        /// 当失败比例较低时，只修正有问题的数据，保持其他数据不变
+        /// </summary>
+        /// <param name="point">监测点</param>
+        /// <param name="validationResult">验证结果</param>
+        /// <returns>修正列表</returns>
+        private List<DataCorrection> ApplyPartialCorrectionStrategy(MonitoringPoint point, ValidationResult validationResult)
+        {
+            var corrections = new List<DataCorrection>();
+            var sortedData = point.PeriodDataList.OrderBy(pd => pd.FileInfo?.FullDateTime).ToList();
+            var random = new Random();
+
+            // 分析验证失败的具体问题，只修正有问题的数据
+            var failedPeriods = ExtractFailedPeriods(validationResult);
+
+            foreach (var failedPeriod in failedPeriods)
+            {
+                var periodData = sortedData.FirstOrDefault(pd => pd.RowNumber == failedPeriod.RowNumber);
+                if (periodData == null) continue;
+
+                foreach (var direction in failedPeriod.FailedDirections)
+                {
+                    var (originalPeriodValue, originalCumulative) = GetDirectionValue(periodData, direction);
+
+                    // 策略1：生成绝对值小于0.3的随机本期变化量
+                    var newPeriodValue = GenerateSmallRandomValue(random, 0.3);
+
+                    // 重新计算累计值
+                    var previousPeriod = GetPreviousPeriodForPartialCorrection(sortedData, periodData);
+                    var newCumulative = previousPeriod != null
+                        ? GetDirectionValue(previousPeriod, direction).cumulativeValue + newPeriodValue
+                        : newPeriodValue; // 如果是第一期，累计值等于本期值
+
+                    // 检查累计值是否在合理范围内
+                    if (FloatingPointUtils.IsGreaterThan(FloatingPointUtils.SafeAbs(newCumulative), _options.MaxCumulativeValue, _options.CumulativeTolerance))
+                    {
+                        // 如果累计值超出范围，调整本期变化量
+                        var maxAllowedCumulative = _options.MaxCumulativeValue * Math.Sign(newCumulative);
+                        var previousCumulative = previousPeriod != null
+                            ? GetDirectionValue(previousPeriod, direction).cumulativeValue
+                            : 0.0;
+                        newPeriodValue = maxAllowedCumulative - previousCumulative;
+                        newCumulative = maxAllowedCumulative;
+                    }
+
+                    // 如果修正后的值仍然不合理，设置为0
+                    if (FloatingPointUtils.IsGreaterThan(FloatingPointUtils.SafeAbs(newPeriodValue), 0.5, _options.CumulativeTolerance))
+                    {
+                        newPeriodValue = 0.0;
+                        newCumulative = previousPeriod != null
+                            ? GetDirectionValue(previousPeriod, direction).cumulativeValue
+                            : 0.0;
+                    }
+
+                    var correction = new DataCorrection
+                    {
+                        PeriodData = periodData,
+                        Direction = direction,
+                        CorrectionType = CorrectionType.Both,
+                        OriginalValue = originalPeriodValue,
+                        CorrectedValue = newPeriodValue,
+                        Reason = $"部分修正策略：修正验证失败的数据，本期变化量={newPeriodValue:F6}, 累计值={newCumulative:F6}",
+                        AdditionalData = new Dictionary<string, object>
+                        {
+                            { "CorrectedCumulative", newCumulative },
+                            { "OriginalCumulative", originalCumulative }
+                        }
+                    };
+
+                    corrections.Add(correction);
+                }
+            }
+
+            return corrections;
+        }
+
+        /// <summary>
+        /// 生成小的随机值
+        /// </summary>
+        /// <param name="random">随机数生成器</param>
+        /// <param name="maxAbsValue">最大绝对值</param>
+        /// <returns>随机值</returns>
+        private double GenerateSmallRandomValue(Random random, double maxAbsValue)
+        {
+            var value = (random.NextDouble() - 0.5) * 2 * maxAbsValue;
+            return FloatingPointUtils.SafeRound(value, 6);
+        }
+
+        /// <summary>
+        /// 获取部分修正策略中的上一期数据
+        /// </summary>
+        /// <param name="sortedData">排序后的数据</param>
+        /// <param name="currentPeriod">当前期数据</param>
+        /// <returns>上一期数据</returns>
+        private PeriodData? GetPreviousPeriodForPartialCorrection(List<PeriodData> sortedData, PeriodData currentPeriod)
+        {
+            var currentIndex = sortedData.IndexOf(currentPeriod);
+            if (currentIndex <= 0) return null;
+            return sortedData[currentIndex - 1];
+        }
+
+        /// <summary>
+        /// 提取验证失败的期数和方向信息
+        /// </summary>
+        /// <param name="validationResult">验证结果</param>
+        /// <returns>失败信息列表</returns>
+        private List<FailedPeriodInfo> ExtractFailedPeriods(ValidationResult validationResult)
+        {
+            var failedPeriods = new List<FailedPeriodInfo>();
+
+            if (string.IsNullOrEmpty(validationResult.Description))
+                return failedPeriods;
+
+            var description = validationResult.Description;
+
+            // 解析验证失败信息，提取期数和方向
+            // 这里需要根据实际的验证结果格式进行调整
+            var lines = description.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+
+            foreach (var line in lines)
+            {
+                if (line.Contains("第") && line.Contains("期"))
+                {
+                    var periodInfo = ParseFailedPeriodLine(line);
+                    if (periodInfo != null)
+                        failedPeriods.Add(periodInfo);
+                }
+            }
+
+            return failedPeriods;
+        }
+
+        /// <summary>
+        /// 解析失败期数行
+        /// </summary>
+        /// <param name="line">失败描述行</param>
+        /// <returns>失败期数信息</returns>
+        private FailedPeriodInfo? ParseFailedPeriodLine(string line)
+        {
+            try
+            {
+                // 提取期数
+                var periodMatch = System.Text.RegularExpressions.Regex.Match(line, @"第(\d+)期");
+                if (!periodMatch.Success) return null;
+
+                var periodNumber = int.Parse(periodMatch.Groups[1].Value);
+
+                // 提取方向信息
+                var directions = new List<DataDirection>();
+                if (line.Contains("X方向")) directions.Add(DataDirection.X);
+                if (line.Contains("Y方向")) directions.Add(DataDirection.Y);
+                if (line.Contains("Z方向")) directions.Add(DataDirection.Z);
+
+                // 如果没有明确的方向信息，假设所有方向都有问题
+                if (!directions.Any())
+                {
+                    directions.AddRange(new[] { DataDirection.X, DataDirection.Y, DataDirection.Z });
+                }
+
+                return new FailedPeriodInfo
+                {
+                    RowNumber = periodNumber,
+                    FailedDirections = directions
+                };
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        /// <summary>
         /// 应用最终修正策略
         /// 当其他策略都失败时，使用智能重置策略
         /// </summary>
@@ -1248,15 +1529,13 @@ namespace DataFixter.Services
 
                 if (directionValues.Any())
                 {
-                    // 计算合理的本期变化量范围
+                    // 计算合理的本期变化量范围，避免使用边界值
                     var validPeriodValues = directionValues.Select(v => v.currentPeriodValue).ToList();
                     var avgPeriodValue = validPeriodValues.Average();
                     var stdPeriodValue = CalculateStandardDeviation(validPeriodValues);
 
-                    // 限制在安全范围内
-                    var safePeriodValue = Math.Max(-_options.MaxCurrentPeriodValue,
-                                                 Math.Min(_options.MaxCurrentPeriodValue, avgPeriodValue));
-
+                    // 生成合理的本期变化量，避免使用边界值
+                    var random = new Random();
                     var currentCumulative = 0.0; // 从0开始累加
 
                     for (int i = 0; i < sortedData.Count; i++)
@@ -1264,8 +1543,35 @@ namespace DataFixter.Services
                         var current = sortedData[i];
                         var (originalPeriodValue, originalCumulative) = GetDirectionValue(current, direction);
 
-                        // 使用计算出的安全值，而不是强制设为0
-                        var newPeriodValue = safePeriodValue;
+                        // 策略1：基于原始数据分布生成合理的本期变化量
+                        double newPeriodValue;
+                        if (FloatingPointUtils.IsLessThan(FloatingPointUtils.SafeAbs(avgPeriodValue), 0.1, _options.CumulativeTolerance))
+                        {
+                            // 如果平均值很小，生成小的随机值
+                            newPeriodValue = GenerateSmallRandomValue(random, 0.2);
+                        }
+                        else
+                        {
+                            // 基于正态分布生成值，但限制在合理范围内
+                            var u1 = random.NextDouble();
+                            var u2 = random.NextDouble();
+                            var z0 = FloatingPointUtils.SafeSqrt(-2.0 * FloatingPointUtils.SafeLog(u1)) * FloatingPointUtils.SafeCos(2.0 * Math.PI * u2);
+
+                            newPeriodValue = FloatingPointUtils.SafeRound(avgPeriodValue + z0 * stdPeriodValue * 0.5, 6);
+
+                            // 限制在安全范围内，但避免使用边界值
+                            var maxSafeValue = _options.MaxCurrentPeriodValue * 0.8; // 使用80%的边界值
+                            if (FloatingPointUtils.IsGreaterThan(FloatingPointUtils.SafeAbs(newPeriodValue), maxSafeValue, _options.CumulativeTolerance))
+                            {
+                                newPeriodValue = FloatingPointUtils.SafeSign(newPeriodValue) * maxSafeValue;
+                            }
+                        }
+
+                        // 确保生成的值不会过小
+                        if (FloatingPointUtils.IsLessThan(FloatingPointUtils.SafeAbs(newPeriodValue), 0.001, _options.CumulativeTolerance))
+                        {
+                            newPeriodValue = FloatingPointUtils.SafeSign(avgPeriodValue) * 0.001;
+                        }
 
                         // 累计值基于本期变化量累加
                         var newCumulative = currentCumulative;
@@ -1281,7 +1587,7 @@ namespace DataFixter.Services
                                 CorrectionType = CorrectionType.Both,
                                 OriginalValue = originalPeriodValue,
                                 CorrectedValue = newPeriodValue,
-                                Reason = $"最终策略：基于数据特征设置安全的本期变化量 {newPeriodValue:F3}",
+                                Reason = $"最终策略：基于数据分布生成合理的本期变化量 {newPeriodValue:F6}，避免边界值",
                                 AdditionalData = new Dictionary<string, object>
                                 {
                                     { "CorrectedCumulative", newCumulative }
@@ -1294,14 +1600,21 @@ namespace DataFixter.Services
                 }
                 else
                 {
-                    // 如果所有数据都异常，则使用保守的0值策略
+                    // 如果所有数据都异常，使用智能重置策略，避免全部设为0
+                    var random = new Random();
+                    var currentCumulative = 0.0;
+
                     for (int i = 0; i < sortedData.Count; i++)
                     {
                         var current = sortedData[i];
                         var (originalPeriodValue, originalCumulative) = GetDirectionValue(current, direction);
 
-                        var newPeriodValue = 0.0;
-                        var newCumulative = 0.0;
+                        // 生成小的随机值，而不是全部设为0
+                        var newPeriodValue = GenerateSmallRandomValue(random, 0.1);
+
+                        // 累计值基于本期变化量累加
+                        var newCumulative = currentCumulative;
+                        currentCumulative += newPeriodValue;
 
                         if (FloatingPointUtils.IsGreaterThan(FloatingPointUtils.SafeAbsoluteDifference(newPeriodValue, originalPeriodValue), _options.CumulativeTolerance, _options.CumulativeTolerance))
                         {
@@ -1312,7 +1625,7 @@ namespace DataFixter.Services
                                 CorrectionType = CorrectionType.Both,
                                 OriginalValue = originalPeriodValue,
                                 CorrectedValue = newPeriodValue,
-                                Reason = $"最终策略：数据严重异常，重置为0",
+                                Reason = $"最终策略：数据严重异常，使用智能重置策略，本期变化量={newPeriodValue:F6}",
                                 AdditionalData = new Dictionary<string, object>
                                 {
                                     { "CorrectedCumulative", newCumulative }
@@ -1377,6 +1690,22 @@ namespace DataFixter.Services
     // CorrectionStatus 和 PointCorrectionResult 已移动到 Models/CorrectionModels.cs
 
     // CorrectionResult 类已移动到 Models/CorrectionModels.cs
+
+    /// <summary>
+    /// 失败期数信息
+    /// </summary>
+    public class FailedPeriodInfo
+    {
+        /// <summary>
+        /// 行号（期数）
+        /// </summary>
+        public int RowNumber { get; set; }
+
+        /// <summary>
+        /// 失败的数据方向
+        /// </summary>
+        public List<DataDirection> FailedDirections { get; set; } = new List<DataDirection>();
+    }
 
     /// <summary>
     /// 修正统计信息

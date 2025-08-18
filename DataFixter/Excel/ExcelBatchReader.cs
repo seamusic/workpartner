@@ -60,8 +60,8 @@ namespace DataFixter.Excel
                         
                         if (result.IsSuccess)
                         {
-                            _logger.LogInformation("成功读取文件: {FileName}, 数据行数: {RowCount}", 
-                                Path.GetFileName(filePath), result.DataRows.Count);
+                            //_logger.LogInformation("成功读取文件: {FileName}, 数据行数: {RowCount}", 
+                            //    Path.GetFileName(filePath), result.DataRows.Count);
                         }
                         else
                         {

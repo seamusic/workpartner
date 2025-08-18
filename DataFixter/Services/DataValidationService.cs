@@ -51,7 +51,7 @@ namespace DataFixter.Services
                         validationResults.AddRange(pointResults);
                         processedPoints++;
 
-                        if (processedPoints % 10 == 0)
+                        if (processedPoints % 100 == 0)
                         {
                             _logger.LogInformation("已处理 {ProcessedPoints}/{TotalPoints} 个监测点", processedPoints, totalPoints);
                         }
