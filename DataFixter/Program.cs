@@ -105,30 +105,30 @@ namespace DataFixter
         /// <returns>处理结果</returns>
         static ProcessingResult ExecuteBatchProcessing(string processedDirectory, string comparisonDirectory)
         {
-            var logger = Log.ForContext<Program>();
+            var logger = new DualLoggerService(typeof(Program));
             var result = new ProcessingResult();
 
             try
             {
-                logger.Information("开始批量处理...");
+                logger.LogOperationStart("批量处理", $"待处理目录：{processedDirectory}，对比目录：{comparisonDirectory}");
 
                 // 步骤1: 读取Excel文件
-                Console.WriteLine("步骤1: 读取Excel文件...");
+                logger.ShowStep("步骤1: 读取Excel文件...");
                 var excelReader = new ExcelBatchReader(processedDirectory, Log.ForContext<ExcelBatchReader>());
                 var processedResults = excelReader.ReadAllFiles();
                 
                 var comparisonReader = new ExcelBatchReader(comparisonDirectory, Log.ForContext<ExcelBatchReader>());
                 var comparisonResults = comparisonReader.ReadAllFiles();
 
-                Console.WriteLine($"  读取完成: 待处理文件 {processedResults.Count} 个, 对比文件 {comparisonResults.Count} 个");
+                logger.ShowComplete($"读取完成: 待处理文件 {processedResults.Count} 个, 对比文件 {comparisonResults.Count} 个");
 
                 // 步骤2: 数据标准化
-                Console.WriteLine("步骤2: 数据标准化...");
+                logger.ShowStep("步骤2: 数据标准化...");
                 var normalizer = new DataNormalizer(Log.ForContext<DataNormalizer>());
                 var normalizedData = normalizer.NormalizeData(processedResults);
                 var normalizedComparisonData = normalizer.NormalizeData(comparisonResults);
 
-                Console.WriteLine($"  标准化完成: 待处理数据 {normalizedData.Count} 条, 对比数据 {normalizedComparisonData.Count} 条");
+                logger.ShowComplete($"标准化完成: 待处理数据 {normalizedData.Count} 条, 对比数据 {normalizedComparisonData.Count} 条");
 
                 // 步骤3: 数据分组和排序
                 Console.WriteLine("步骤3: 数据分组和排序...");
@@ -200,11 +200,12 @@ namespace DataFixter
                 result.OutputResult = outputResult;
                 result.ReportResult = reportResult;
 
-                logger.Information("批量处理完成");
+                logger.LogOperationComplete("批量处理", "成功完成", $"处理文件：{processedResults.Count}个，监测点：{monitoringPoints.Count}个，修正记录：{correctionResult.AdjustmentRecords.Count}条");
             }
             catch (Exception ex)
             {
-                logger.Error(ex, "批量处理过程中发生异常");
+                logger.ShowError($"批量处理过程中发生异常: {ex.Message}");
+                logger.FileError(ex, "批量处理过程中发生异常");
                 result.Status = ProcessingStatus.Error;
                 result.Message = $"处理过程中发生异常: {ex.Message}";
             }

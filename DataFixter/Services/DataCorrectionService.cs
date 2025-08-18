@@ -13,7 +13,7 @@ namespace DataFixter.Services
     /// </summary>
     public class DataCorrectionService
     {
-        private readonly ILogger _logger;
+        private readonly DualLoggerService _logger;
         private readonly CorrectionOptions _options;
         private readonly List<AdjustmentRecord> _adjustmentRecords;
         private readonly List<DataCorrection> _allCorrections; // 添加字段来跟踪所有修正记录
@@ -25,7 +25,7 @@ namespace DataFixter.Services
         /// <param name="options">修正选项</param>
         public DataCorrectionService(ILogger logger, CorrectionOptions? options = null)
         {
-            _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+            _logger = new DualLoggerService(typeof(DataCorrectionService));
             _options = options ?? new CorrectionOptions();
             _adjustmentRecords = new List<AdjustmentRecord>();
             _allCorrections = new List<DataCorrection>(); // 初始化修正记录列表
@@ -45,7 +45,7 @@ namespace DataFixter.Services
 
             try
             {
-                _logger.Information("开始修正 {TotalPoints} 个监测点的数据", totalPoints);
+                _logger.LogOperationStart("数据修正", $"监测点数量：{totalPoints}");
 
                 // 按点名分组验证结果
                 var validationByPoint = validationResults
@@ -59,7 +59,7 @@ namespace DataFixter.Services
                     {
                         if (string.IsNullOrEmpty(point.PointName))
                         {
-                            _logger.Warning("点号为空，无法处理");
+                            _logger.ShowWarning("点号为空，无法处理");
                             continue;
                         }
 
@@ -113,12 +113,13 @@ namespace DataFixter.Services
                         processedPoints++;
                         if (processedPoints % 100 == 0)
                         {
-                            _logger.Information("已处理 {ProcessedPoints}/{TotalPoints} 个监测点", processedPoints, totalPoints);
+                            _logger.UpdateProgress(processedPoints, totalPoints, "监测点修正");
                         }
                     }
                     catch (Exception ex)
                     {
-                        _logger.Error(ex, "修正监测点 {PointName} 时发生异常", point.PointName);
+                        _logger.ShowError($"修正监测点 {point.PointName} 时发生异常: {ex.Message}");
+                        _logger.FileError(ex, "修正监测点 {PointName} 时发生异常", point.PointName);
 
                         result.AddPointResult(new PointCorrectionResult
                         {
@@ -135,7 +136,8 @@ namespace DataFixter.Services
             }
             catch (Exception ex)
             {
-                _logger.Error(ex, "修正所有监测点数据时发生异常");
+                _logger.ShowError($"修正所有监测点数据时发生异常: {ex.Message}");
+                _logger.FileError(ex, "修正所有监测点数据时发生异常");
                 result.Status = CorrectionStatus.Error;
                 result.Message = $"修正过程中发生异常: {ex.Message}";
             }
@@ -169,12 +171,12 @@ namespace DataFixter.Services
                     result.CorrectedPeriods = corrections.Select(c => c.PeriodData).Distinct().Count();
                     result.CorrectedValues = corrections.Count;
 
-                    _logger.Information("监测点 {PointName} 修正完成: {CorrectionCount} 个修正",
-                        point.PointName, result.CorrectedValues);
+                    _logger.FileInfo("监测点修正", $"修正了{result.CorrectedValues}个值",
+                        $"监测点：{point.PointName}，修正详情：{string.Join(", ", corrections.Select(c => $"{c.Direction}方向{c.CorrectionType}"))}");
                 }
                 else
                 {
-                    _logger.Information("{PointName} 没有需要修正的", point.PointName);
+                    _logger.ConsoleInfo("{PointName} 没有需要修正的", point.PointName);
 
                 }
             }
@@ -182,7 +184,8 @@ namespace DataFixter.Services
             {
                 result.Status = CorrectionStatus.Error;
                 result.Message = $"修正过程中发生异常: {ex.Message}";
-                _logger.Error(ex, "修正监测点 {PointName} 时发生异常", point.PointName);
+                _logger.ShowError($"修正监测点 {point.PointName} 时发生异常: {ex.Message}");
+                _logger.FileError(ex, "修正监测点 {PointName} 时发生异常", point.PointName);
             }
 
             return result;
@@ -229,7 +232,8 @@ namespace DataFixter.Services
                     if (validationResult.Status == ValidationStatus.Invalid)
                     {
                         needsAggressiveStrategy = true;
-                        _logger.Warning("监测点 {PointName} 修正后验证失败，需要激进策略", point.PointName);
+                        _logger.ShowWarning($"监测点 {point.PointName} 修正后验证失败，需要激进策略");
+                        _logger.FileWarning("监测点 {PointName} 修正后验证失败，需要激进策略", point.PointName);
                     }
                 }
                 else
@@ -239,14 +243,16 @@ namespace DataFixter.Services
                     if (validationResult.Status == ValidationStatus.Invalid)
                     {
                         needsAggressiveStrategy = true;
-                        _logger.Warning("监测点 {PointName} 全局策略未产生修正，但数据验证失败，需要激进策略", point.PointName);
+                        _logger.ShowWarning($"监测点 {point.PointName} 全局策略未产生修正，但数据验证失败，需要激进策略");
+                        _logger.FileWarning("监测点 {PointName} 全局策略未产生修正，但数据验证失败，需要激进策略", point.PointName);
                     }
                 }
 
                 // 如果需要激进策略，直接应用激进策略（不回滚之前的修正）
                 if (needsAggressiveStrategy)
                 {
-                    _logger.Information("监测点 {PointName} 应用激进修正策略", point.PointName);
+                    _logger.ConsoleInfo("监测点 {PointName} 应用激进修正策略", point.PointName);
+                    _logger.FileInfo("监测点 {PointName} 应用激进修正策略，开始应用激进修正算法", point.PointName);
                     var aggressiveCorrections = ApplyAggressiveCorrectionStrategy(point);
 
                     if (aggressiveCorrections.Any())
@@ -259,26 +265,30 @@ namespace DataFixter.Services
                         var finalValidation = ValidatePointDataConsistency(point);
                         if (finalValidation.Status == ValidationStatus.Invalid)
                         {
-                            _logger.Warning("激进策略后数据仍然无效: {Description}", finalValidation.Description);
+                            _logger.ShowWarning($"激进策略后数据仍然无效: {finalValidation.Description}");
+                            _logger.FileWarning("激进策略后数据仍然无效: {Description}", finalValidation.Description);
 
                             // 检查失败比例，如果低于20%，使用部分修正策略
                             var failureRatio = CalculateValidationFailureRatio(point, finalValidation);
                             if (failureRatio < 0.2) // 失败比例低于20%
                             {
-                                _logger.Information("激进策略后失败比例较低 ({FailureRatio:P1})，使用部分修正策略", failureRatio);
+                                _logger.ConsoleInfo("激进策略后失败比例较低 ({0:P1})，使用部分修正策略", failureRatio);
+                                _logger.FileInfo("激进策略后失败比例较低 ({FailureRatio:P1})，使用部分修正策略", failureRatio);
                                 var partialCorrections = ApplyPartialCorrectionStrategy(point, finalValidation);
                                 if (partialCorrections.Any())
                                 {
                                     ApplyCorrections(partialCorrections);
                                     result.CorrectedPeriods = partialCorrections.Select(c => c.PeriodData).Distinct().Count();
                                     result.CorrectedValues = partialCorrections.Count;
-                                    _logger.Information("部分修正策略完成，修正了 {Count} 个值", partialCorrections.Count);
+                                    _logger.ConsoleInfo("部分修正策略完成，修正了 {0} 个值", partialCorrections.Count);
+                                    _logger.FileInfo("部分修正策略完成，修正了 {Count} 个值", partialCorrections.Count);
                                 }
                             }
                             else
                             {
                                 // 失败比例较高，使用最终修正策略
-                                _logger.Information("激进策略后失败比例较高 ({FailureRatio:P1})，使用最终修正策略", failureRatio);
+                                _logger.ConsoleInfo("激进策略后失败比例较高 ({0:P1})，使用最终修正策略", failureRatio);
+                                _logger.FileInfo("激进策略后失败比例较高 ({FailureRatio:P1})，使用最终修正策略", failureRatio);
                                 var finalCorrections = ApplyFinalCorrectionStrategy(point);
                                 if (finalCorrections.Any())
                                 {
@@ -287,23 +297,27 @@ namespace DataFixter.Services
                                     result.CorrectedPeriods = finalCorrections.Select(c => c.PeriodData).Distinct().Count();
                                     result.CorrectedValues = finalCorrections.Count;
 
-                                    _logger.Information("应用最终修正策略完成");
+                                    _logger.ConsoleInfo("应用最终修正策略完成");
+                                    _logger.FileInfo("应用最终修正策略完成");
                                 }
                             }
                         }
                         else
                         {
-                            _logger.Information("激进策略修正成功，数据验证通过");
+                            _logger.ConsoleInfo("激进策略修正成功，数据验证通过");
+                            _logger.FileInfo("激进策略修正成功，数据验证通过");
                         }
                     }
                     else
                     {
-                        _logger.Warning("激进策略未产生任何修正");
+                        _logger.ShowWarning("激进策略未产生任何修正");
+                        _logger.FileWarning("激进策略未产生任何修正");
                     }
                 }
                 else if (corrections.Any())
                 {
-                    _logger.Information("监测点 {PointName} 修正后数据验证通过", point.PointName);
+                    _logger.ConsoleInfo("监测点 {0} 修正后数据验证通过", point.PointName);
+                    _logger.FileInfo("监测点 {PointName} 修正后数据验证通过", point.PointName);
                 }
 
                 // 记录调整记录
@@ -326,14 +340,15 @@ namespace DataFixter.Services
                     _adjustmentRecords.Add(adjustmentRecord);
                 }
 
-                _logger.Information("监测点 {PointName} 修正完成: {CorrectionCount} 个修正",
-                    point.PointName, result.CorrectedValues);
+                _logger.FileInfo("监测点修正", $"修正了{result.CorrectedValues}个值",
+                    $"监测点：{point.PointName}，修正详情：{string.Join(", ", allCorrections.Select(c => $"{c.Direction}方向{c.CorrectionType}"))}");
             }
             catch (Exception ex)
             {
                 result.Status = CorrectionStatus.Error;
                 result.Message = $"修正过程中发生异常: {ex.Message}";
-                _logger.Error(ex, "修正监测点 {PointName} 时发生异常", point.PointName);
+                _logger.ShowError($"修正监测点 {point.PointName} 时发生异常: {ex.Message}");
+                _logger.FileError(ex, "修正监测点 {PointName} 时发生异常", point.PointName);
             }
 
             return result;
@@ -585,7 +600,8 @@ namespace DataFixter.Services
                     if (attempts > maxAttempts)
                     {
                         // 如果尝试次数过多，使用安全的默认值
-                        _logger.Warning($"监测点 {pointName} {direction}方向生成值失败，使用安全默认值");
+                        _logger.ShowWarning($"监测点 {pointName} {direction}方向生成值失败，使用安全默认值");
+                        _logger.FileWarning("监测点 {PointName} {Direction}方向生成值失败，使用安全默认值", pointName, direction);
                         newPeriodValue = FloatingPointUtils.SafeSign(avgPeriodValue) * FloatingPointUtils.SafeMax(0.1, FloatingPointUtils.SafeAbs(avgPeriodValue));
                         break;
                     }
@@ -879,7 +895,8 @@ namespace DataFixter.Services
             // 将 formattedTime 转换为 DateTime 进行比较
             if (!DateTime.TryParse(formattedTime, out DateTime targetTime))
             {
-                _logger.Warning("无法解析时间格式: {FormattedTime}", formattedTime);
+                _logger.ShowWarning($"无法解析时间格式: {formattedTime}");
+                _logger.FileWarning("无法解析时间格式: {FormattedTime}", formattedTime);
                 return null;
             }
 

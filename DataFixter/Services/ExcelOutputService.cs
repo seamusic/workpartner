@@ -639,9 +639,9 @@ namespace DataFixter.Services
                     report.AppendLine($"  修正记录:");
                     foreach (var correction in pointResult.Corrections)
                     {
-                        report.AppendLine($"    {correction.Direction}方向 {correction.CorrectionType}: " +
-                                        $"{correction.OriginalValue:F6} -> {correction.CorrectedValue:F6}");
-                        report.AppendLine($"    原因: {correction.Reason}");
+                        //report.AppendLine($"    {correction.Direction}方向 {correction.CorrectionType}: " +
+                        //                $"{correction.OriginalValue:F6} -> {correction.CorrectedValue:F6}");
+                        //report.AppendLine($"    原因: {correction.Reason}");
                     }
                 }
                 report.AppendLine();
