@@ -3,17 +3,16 @@ using System.Collections.Generic;
 using System.Linq;
 using DataFixter.Models;
 using DataFixter.Utils;
-using Microsoft.Extensions.Logging;
+using Serilog;
 
 namespace DataFixter.Services
 {
     /// <summary>
-    /// 数据验证服务
-    /// 实现累计变化量计算逻辑验证、与对比数据的交叉验证和异常数据标记功能
+    /// 数据验证服务，负责验证监测数据的完整性和一致性
     /// </summary>
     public class DataValidationService
     {
-        private readonly ILogger<DataValidationService> _logger;
+        private readonly ILogger _logger;
         private readonly ValidationOptions _options;
 
         /// <summary>
@@ -21,7 +20,7 @@ namespace DataFixter.Services
         /// </summary>
         /// <param name="logger">日志记录器</param>
         /// <param name="options">验证选项</param>
-        public DataValidationService(ILogger<DataValidationService> logger, ValidationOptions? options = null)
+        public DataValidationService(ILogger logger, ValidationOptions? options = null)
         {
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _options = options ?? new ValidationOptions();
@@ -41,7 +40,7 @@ namespace DataFixter.Services
 
             try
             {
-                _logger.LogInformation("开始验证 {TotalPoints} 个监测点的数据逻辑", totalPoints);
+                _logger.Information("开始验证 {TotalPoints} 个监测点的数据逻辑", totalPoints);
 
                 foreach (var point in monitoringPoints)
                 {
@@ -53,12 +52,12 @@ namespace DataFixter.Services
 
                         if (processedPoints % 100 == 0)
                         {
-                            _logger.LogInformation("已处理 {ProcessedPoints}/{TotalPoints} 个监测点", processedPoints, totalPoints);
+                            _logger.Information("已处理 {ProcessedPoints}/{TotalPoints} 个监测点", processedPoints, totalPoints);
                         }
                     }
                     catch (Exception ex)
                     {
-                        _logger.LogError(ex, "验证监测点 {PointName} 时发生异常", point.PointName);
+                        _logger.Error(ex, "验证监测点 {PointName} 时发生异常", point.PointName);
 
                         // 添加验证失败的结果
                         validationResults.Add(new ValidationResult(ValidationStatus.Invalid, "系统异常", $"验证过程中发生异常: {ex.Message}")
@@ -69,12 +68,12 @@ namespace DataFixter.Services
                     }
                 }
 
-                _logger.LogInformation("数据验证完成: 总计 {TotalPoints} 个监测点, 生成 {ResultCount} 个验证结果",
+                _logger.Information("数据验证完成: 总计 {TotalPoints} 个监测点, 生成 {ResultCount} 个验证结果",
                     totalPoints, validationResults.Count);
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "验证所有监测点数据时发生异常");
+                _logger.Error(ex, "验证所有监测点数据时发生异常");
             }
 
             return validationResults;
@@ -144,7 +143,7 @@ namespace DataFixter.Services
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "验证监测点 {PointName} 时发生异常", point.PointName);
+                _logger.Warning(ex, "验证监测点 {PointName} 时发生异常", point.PointName);
                 results.Add(new ValidationResult(ValidationStatus.Invalid, "验证异常", $"验证过程中发生异常: {ex.Message}")
                 {
                     PointName = point.PointName,
@@ -160,7 +159,7 @@ namespace DataFixter.Services
             // 将 formattedTime 转换为 DateTime 进行比较
             if (!DateTime.TryParse(formattedTime, out DateTime targetTime))
             {
-                _logger.LogWarning("无法解析时间格式: {FormattedTime}", formattedTime);
+                _logger.Warning("无法解析时间格式: {FormattedTime}", formattedTime);
                 return null;
             }
 
@@ -240,7 +239,7 @@ namespace DataFixter.Services
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "验证监测点 {PointName} 累计变化量计算逻辑时发生异常", point.PointName);
+                _logger.Warning(ex, "验证监测点 {PointName} 累计变化量计算逻辑时发生异常", point.PointName);
             }
 
             return results;
@@ -312,7 +311,7 @@ namespace DataFixter.Services
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "验证 {Direction} 方向累计变化量时发生异常", direction);
+                _logger.Warning(ex, "验证 {Direction} 方向累计变化量时发生异常", direction);
                 return null;
             }
         }
@@ -363,7 +362,7 @@ namespace DataFixter.Services
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "与对比数据交叉验证监测点 {PointName} 时发生异常", point.PointName);
+                _logger.Warning(ex, "与对比数据交叉验证监测点 {PointName} 时发生异常", point.PointName);
             }
 
             return results;
@@ -397,7 +396,7 @@ namespace DataFixter.Services
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "验证对比数据完整性时发生异常");
+                _logger.Warning(ex, "验证对比数据完整性时发生异常");
                 return null;
             }
         }
@@ -432,7 +431,7 @@ namespace DataFixter.Services
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "验证对比数据完整性时发生异常");
+                _logger.Warning(ex, "验证对比数据完整性时发生异常");
                 return null;
             }
         }
@@ -472,7 +471,7 @@ namespace DataFixter.Services
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "验证数据一致性时发生异常");
+                _logger.Warning(ex, "验证数据一致性时发生异常");
             }
 
             return results;
@@ -507,7 +506,7 @@ namespace DataFixter.Services
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "验证数据量级时发生异常");
+                _logger.Warning(ex, "验证数据量级时发生异常");
                 return null;
             }
         }
@@ -558,7 +557,7 @@ namespace DataFixter.Services
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "验证数据连续性时发生异常");
+                _logger.Warning(ex, "验证数据连续性时发生异常");
             }
 
             return results;
@@ -594,7 +593,7 @@ namespace DataFixter.Services
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "验证数据跳跃时发生异常");
+                _logger.Warning(ex, "验证数据跳跃时发生异常");
                 return null;
             }
         }

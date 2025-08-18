@@ -2,17 +2,16 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using DataFixter.Models;
-using Microsoft.Extensions.Logging;
+using Serilog;
 
 namespace DataFixter.Excel
 {
     /// <summary>
-    /// 数据标准化处理器
-    /// 统一数据格式和类型，处理空值和异常数据
+    /// 数据标准化器，负责将Excel读取结果转换为标准的数据模型
     /// </summary>
     public class DataNormalizer
     {
-        private readonly ILogger<DataNormalizer> _logger;
+        private readonly ILogger _logger;
         private readonly DataNormalizationOptions _options;
 
         /// <summary>
@@ -20,7 +19,7 @@ namespace DataFixter.Excel
         /// </summary>
         /// <param name="logger">日志记录器</param>
         /// <param name="options">标准化选项</param>
-        public DataNormalizer(ILogger<DataNormalizer> logger, DataNormalizationOptions? options = null)
+        public DataNormalizer(ILogger logger, DataNormalizationOptions? options = null)
         {
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _options = options ?? new DataNormalizationOptions();
@@ -62,19 +61,19 @@ namespace DataFixter.Excel
                         }
                         catch (Exception ex)
                         {
-                            _logger.LogWarning(ex, "标准化行数据失败: 文件 {FileName}, 行号 {RowNumber}", 
+                            _logger.Warning(ex, "标准化行数据失败: 文件 {FileName}, 行号 {RowNumber}", 
                                 System.IO.Path.GetFileName(readResult.FilePath), excelRow.RowNumber);
                             skippedRows++;
                         }
                     }
                 }
 
-                _logger.LogInformation("数据标准化完成: 总计 {TotalRows} 行, 处理 {ProcessedRows} 行, 跳过 {SkippedRows} 行", 
+                _logger.Information("数据标准化完成: 总计 {TotalRows} 行, 处理 {ProcessedRows} 行, 跳过 {SkippedRows} 行", 
                     totalRows, processedRows, skippedRows);
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "数据标准化过程中发生异常");
+                _logger.Error(ex, "数据标准化过程中发生异常");
             }
 
             return normalizedData;
@@ -129,7 +128,7 @@ namespace DataFixter.Excel
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "标准化行数据失败: 行号 {RowNumber}", excelRow.RowNumber);
+                _logger.Warning(ex, "标准化行数据失败: 行号 {RowNumber}", excelRow.RowNumber);
                 return null;
             }
         }
@@ -199,14 +198,14 @@ namespace DataFixter.Excel
                 // 处理无穷大和NaN
                 if (double.IsInfinity(value) || double.IsNaN(value))
                 {
-                    _logger.LogDebug("检测到无效数值: {FieldName} = {Value}, 设置为0", fieldName, value);
+                    _logger.Debug("检测到无效数值: {FieldName} = {Value}, 设置为0", fieldName, value);
                     return 0.0;
                 }
 
                 // 处理超出范围的值
                 if (Math.Abs(value) > _options.MaxValueThreshold)
                 {
-                    _logger.LogDebug("检测到超出阈值的数值: {FieldName} = {Value}, 限制为阈值", fieldName, value);
+                    _logger.Debug("检测到超出阈值的数值: {FieldName} = {Value}, 限制为阈值", fieldName, value);
                     return value > 0 ? _options.MaxValueThreshold : -_options.MaxValueThreshold;
                 }
 
@@ -223,7 +222,7 @@ namespace DataFixter.Excel
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "标准化数值失败: {FieldName} = {Value}", fieldName, value);
+                _logger.Warning(ex, "标准化数值失败: {FieldName} = {Value}", fieldName, value);
                 return 0.0;
             }
         }
@@ -269,7 +268,7 @@ namespace DataFixter.Excel
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "验证数据完整性失败: 点名 {PointName}", data.PointName);
+                _logger.Warning(ex, "验证数据完整性失败: 点名 {PointName}", data.PointName);
                 return false;
             }
         }

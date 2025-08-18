@@ -2,23 +2,22 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using DataFixter.Models;
-using Microsoft.Extensions.Logging;
+using Serilog;
 
 namespace DataFixter.Services
 {
     /// <summary>
-    /// 数据分组和排序服务
-    /// 实现按点名分组功能、按时间排序功能和数据完整性检查
+    /// 数据分组服务，负责将数据按监测点名称分组并排序
     /// </summary>
     public class DataGroupingService
     {
-        private readonly ILogger<DataGroupingService> _logger;
+        private readonly ILogger _logger;
 
         /// <summary>
         /// 构造函数
         /// </summary>
         /// <param name="logger">日志记录器</param>
-        public DataGroupingService(ILogger<DataGroupingService> logger)
+        public DataGroupingService(ILogger logger)
         {
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         }
@@ -35,14 +34,14 @@ namespace DataFixter.Services
 
             try
             {
-                _logger.LogInformation("开始按点名分组数据，总计 {TotalRows} 行", periodDataList.Count);
+                _logger.Information("开始按点名分组数据，总计 {TotalRows} 行", periodDataList.Count);
 
                 // 按点名分组
                 foreach (var data in periodDataList)
                 {
                     if (string.IsNullOrWhiteSpace(data.PointName))
                     {
-                        _logger.LogWarning("跳过空点名的数据行: 行号 {RowNumber}", data.RowNumber);
+                        _logger.Warning("跳过空点名的数据行: 行号 {RowNumber}", data.RowNumber);
                         continue;
                     }
 
@@ -76,11 +75,11 @@ namespace DataFixter.Services
                     monitoringPoints.Add(monitoringPoint);
                 }
 
-                _logger.LogInformation("数据分组完成: 总计 {PointCount} 个监测点", monitoringPoints.Count);
+                _logger.Information("数据分组完成: 总计 {PointCount} 个监测点", monitoringPoints.Count);
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "按点名分组数据时发生异常");
+                _logger.Error(ex, "按点名分组数据时发生异常");
             }
 
             return monitoringPoints;
@@ -94,18 +93,18 @@ namespace DataFixter.Services
         {
             try
             {
-                _logger.LogInformation("开始按时间排序 {PointCount} 个监测点的数据", monitoringPoints.Count);
+                _logger.Information("开始按时间排序 {PointCount} 个监测点的数据", monitoringPoints.Count);
 
                 foreach (var point in monitoringPoints)
                 {
                     point.SortPeriodDataByTime();
                 }
 
-                _logger.LogInformation("时间排序完成");
+                _logger.Information("时间排序完成");
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "按时间排序数据时发生异常");
+                _logger.Error(ex, "按时间排序数据时发生异常");
             }
         }
 
@@ -125,7 +124,7 @@ namespace DataFixter.Services
 
             try
             {
-                _logger.LogInformation("开始检查 {PointCount} 个监测点的数据完整性", totalPoints);
+                _logger.Information("开始检查 {PointCount} 个监测点的数据完整性", totalPoints);
 
                 foreach (var point in monitoringPoints)
                 {
@@ -197,12 +196,12 @@ namespace DataFixter.Services
                 report.InvalidDataCount = invalidDataCount;
                 report.IssueCount = report.Issues.Count;
 
-                _logger.LogInformation("数据完整性检查完成: 总计 {PointCount} 个点, {PeriodCount} 期数据, 发现 {IssueCount} 个问题", 
+                _logger.Information("数据完整性检查完成: 总计 {PointCount} 个点, {PeriodCount} 期数据, 发现 {IssueCount} 个问题", 
                     totalPoints, totalPeriods, report.IssueCount);
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "检查数据完整性时发生异常");
+                _logger.Error(ex, "检查数据完整性时发生异常");
             }
 
             return report;
@@ -244,7 +243,7 @@ namespace DataFixter.Services
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "检查期数据完整性失败: 点名 {PointName}", point.PointName);
+                _logger.Warning(ex, "检查期数据完整性失败: 点名 {PointName}", point.PointName);
             }
 
             return issues;
@@ -292,7 +291,7 @@ namespace DataFixter.Services
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "检查数值完整性失败: 点名 {PointName}, 行号 {RowNumber}", pointName, periodData.RowNumber);
+                _logger.Warning(ex, "检查数值完整性失败: 点名 {PointName}, 行号 {RowNumber}", pointName, periodData.RowNumber);
             }
 
             return issues;
@@ -330,7 +329,7 @@ namespace DataFixter.Services
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "检查时间连续性失败: 点名 {PointName}, 行号 {RowNumber}", point.PointName, periodData.RowNumber);
+                _logger.Warning(ex, "检查时间连续性失败: 点名 {PointName}, 行号 {RowNumber}", point.PointName, periodData.RowNumber);
             }
 
             return issues;
@@ -354,7 +353,7 @@ namespace DataFixter.Services
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "检查重复数据失败: 点名 {PointName}", point.PointName);
+                _logger.Warning(ex, "检查重复数据失败: 点名 {PointName}", point.PointName);
                 return 0;
             }
         }

@@ -1,7 +1,8 @@
 using DataFixter.Models;
 using DataFixter.Services;
 using DataFixter.Excel;
-using Microsoft.Extensions.Logging;
+using Serilog;
+using DataFixter.Logging;
 
 namespace DataFixter
 {
@@ -9,6 +10,9 @@ namespace DataFixter
     {
         static void Main(string[] args)
         {
+            // 配置Serilog日志
+            LoggingConfiguration.ConfigureLogging();
+            
             Console.WriteLine("=== DataFixter 数据修正工具 ===");
             Console.WriteLine("用于修复监测数据中累计变化量计算错误的工具");
             Console.WriteLine();
@@ -47,14 +51,8 @@ namespace DataFixter
                 Console.WriteLine($"对比目录: {comparisonDirectory}");
                 Console.WriteLine();
 
-                // 创建日志工厂
-                var loggerFactory = LoggerFactory.Create(builder =>
-                {
-                    builder.AddConsole();
-                });
-
                 // 执行完整的批量处理流程
-                var result = ExecuteBatchProcessing(loggerFactory, processedDirectory, comparisonDirectory);
+                var result = ExecuteBatchProcessing(processedDirectory, comparisonDirectory);
 
                 // 输出处理结果
                 Console.WriteLine("=== 处理完成 ===");
@@ -71,8 +69,14 @@ namespace DataFixter
             }
             catch (Exception ex)
             {
+                Log.Error(ex, "DataFixter 运行时发生致命错误: {Message}", ex.Message);
                 Console.WriteLine($"DataFixter 运行时发生致命错误: {ex.Message}");
                 Console.WriteLine($"详细错误信息: {ex}");
+            }
+            finally
+            {
+                // 关闭日志系统
+                LoggingConfiguration.CloseLogging();
             }
         }
 
@@ -99,28 +103,28 @@ namespace DataFixter
         /// <param name="processedDirectory">待处理目录</param>
         /// <param name="comparisonDirectory">对比目录</param>
         /// <returns>处理结果</returns>
-        static ProcessingResult ExecuteBatchProcessing(ILoggerFactory loggerFactory, string processedDirectory, string comparisonDirectory)
+        static ProcessingResult ExecuteBatchProcessing(string processedDirectory, string comparisonDirectory)
         {
-            var logger = loggerFactory.CreateLogger<Program>();
+            var logger = Log.ForContext<Program>();
             var result = new ProcessingResult();
 
             try
             {
-                logger.LogInformation("开始批量处理...");
+                logger.Information("开始批量处理...");
 
                 // 步骤1: 读取Excel文件
                 Console.WriteLine("步骤1: 读取Excel文件...");
-                var excelReader = new ExcelBatchReader(processedDirectory, loggerFactory.CreateLogger<ExcelBatchReader>());
+                var excelReader = new ExcelBatchReader(processedDirectory, Log.ForContext<ExcelBatchReader>());
                 var processedResults = excelReader.ReadAllFiles();
                 
-                var comparisonReader = new ExcelBatchReader(comparisonDirectory, loggerFactory.CreateLogger<ExcelBatchReader>());
+                var comparisonReader = new ExcelBatchReader(comparisonDirectory, Log.ForContext<ExcelBatchReader>());
                 var comparisonResults = comparisonReader.ReadAllFiles();
 
                 Console.WriteLine($"  读取完成: 待处理文件 {processedResults.Count} 个, 对比文件 {comparisonResults.Count} 个");
 
                 // 步骤2: 数据标准化
                 Console.WriteLine("步骤2: 数据标准化...");
-                var normalizer = new DataNormalizer(loggerFactory.CreateLogger<DataNormalizer>());
+                var normalizer = new DataNormalizer(Log.ForContext<DataNormalizer>());
                 var normalizedData = normalizer.NormalizeData(processedResults);
                 var normalizedComparisonData = normalizer.NormalizeData(comparisonResults);
 
@@ -128,7 +132,7 @@ namespace DataFixter
 
                 // 步骤3: 数据分组和排序
                 Console.WriteLine("步骤3: 数据分组和排序...");
-                var groupingService = new DataGroupingService(loggerFactory.CreateLogger<DataGroupingService>());
+                var groupingService = new DataGroupingService(Log.ForContext<DataGroupingService>());
                 var monitoringPoints = groupingService.GroupByPointName(normalizedData);
                 groupingService.SortAllPointsByTime(monitoringPoints);
 
@@ -138,10 +142,10 @@ namespace DataFixter
                 Console.WriteLine("步骤4: 数据验证...");
                 
                 // 创建配置服务并获取验证选项
-                var configService = new ConfigurationService(loggerFactory.CreateLogger<ConfigurationService>());
+                var configService = new ConfigurationService(Log.ForContext<ConfigurationService>());
                 var validationOptions = configService.GetValidationOptions();
                 
-                var validationService = new DataValidationService(loggerFactory.CreateLogger<DataValidationService>(), validationOptions);
+                var validationService = new DataValidationService(Log.ForContext<DataValidationService>(), validationOptions);
                 var validationResults = validationService.ValidateAllPoints(monitoringPoints, normalizedComparisonData);
 
                 var validCount = validationResults.Count(v => v.Status == ValidationStatus.Valid);
@@ -157,7 +161,7 @@ namespace DataFixter
                 // 获取修正选项
                 var correctionOptions = configService.GetCorrectionOptions();
                 
-                var correctionService = new DataCorrectionService(loggerFactory.CreateLogger<DataCorrectionService>(), correctionOptions);
+                var correctionService = new DataCorrectionService(Log.ForContext<DataCorrectionService>(), correctionOptions);
                 var correctionResult = correctionService.CorrectAllPoints(monitoringPoints, validationResults);
 
                 Console.WriteLine($"  修正完成: 修正 {correctionResult.AdjustmentRecords.Count} 条记录");
@@ -171,21 +175,6 @@ namespace DataFixter
                 
                 Console.WriteLine($"  修正后验证: 通过 {correctedValidCount} 条, 失败 {correctedInvalidCount} 条");
 
-                // 调试信息：检查修正前后的数据
-                Console.WriteLine("=== 调试信息：数据修正检查 ===");
-                var samplePoint = monitoringPoints.FirstOrDefault();
-                if (samplePoint != null)
-                {
-                    Console.WriteLine($"示例监测点: {samplePoint.PointName}");
-                    var sampleData = samplePoint.PeriodDataList.FirstOrDefault();
-                    if (sampleData != null)
-                    {
-                        Console.WriteLine($"  修正前 - X本期: {sampleData.CurrentPeriodX}, X累计: {sampleData.CumulativeX}");
-                        Console.WriteLine($"  修正前 - Y本期: {sampleData.CurrentPeriodY}, Y累计: {sampleData.CumulativeY}");
-                        Console.WriteLine($"  修正前 - Z本期: {sampleData.CurrentPeriodZ}, Z累计: {sampleData.CumulativeZ}");
-                    }
-                }
-
                 // 步骤6: 生成输出文件
                 Console.WriteLine("步骤6: 生成输出文件...");
                 var outputDirectory = Path.Combine(processedDirectory, "修正后");
@@ -193,7 +182,7 @@ namespace DataFixter
                 // 获取输出选项
                 var outputOptions = configService.GetOutputOptions();
                 
-                var outputService = new ExcelOutputService(loggerFactory.CreateLogger<ExcelOutputService>(), outputOptions);
+                var outputService = new ExcelOutputService(Log.ForContext<ExcelOutputService>(), outputOptions);
 
                 var outputResult = outputService.GenerateCorrectedExcelFiles(monitoringPoints, outputDirectory, processedDirectory);
                 var reportResult = outputService.GenerateCorrectionReport(correctionResult, validationResults, outputDirectory);
@@ -211,11 +200,11 @@ namespace DataFixter
                 result.OutputResult = outputResult;
                 result.ReportResult = reportResult;
 
-                logger.LogInformation("批量处理完成");
+                logger.Information("批量处理完成");
             }
             catch (Exception ex)
             {
-                logger.LogError(ex, "批量处理过程中发生异常");
+                logger.Error(ex, "批量处理过程中发生异常");
                 result.Status = ProcessingStatus.Error;
                 result.Message = $"处理过程中发生异常: {ex.Message}";
             }
@@ -286,7 +275,7 @@ namespace DataFixter
             };
 
             // 创建数据修正服务
-            var logger = LoggerFactory.Create(builder => builder.AddConsole()).CreateLogger<Services.DataCorrectionService>();
+            var logger = Log.ForContext<Services.DataCorrectionService>();
             var correctionService = new Services.DataCorrectionService(logger, options);
 
             Console.WriteLine("修正前数据:");
@@ -367,11 +356,10 @@ namespace DataFixter
         /// <summary>
         /// 测试数据验证服务
         /// </summary>
-        /// <param name="loggerFactory">日志工厂</param>
-        static void TestDataValidationService(ILoggerFactory loggerFactory)
+        static void TestDataValidationService()
         {
-            var logger = loggerFactory.CreateLogger<Program>();
-            logger.LogInformation("开始测试数据验证服务...");
+            var logger = Log.ForContext<Program>();
+            logger.Information("开始测试数据验证服务...");
 
             try
             {
@@ -380,7 +368,7 @@ namespace DataFixter
                 var comparisonData = CreateTestComparisonData();
 
                 // 创建数据验证服务
-                var validationService = new DataValidationService(loggerFactory.CreateLogger<DataValidationService>());
+                var validationService = new DataValidationService(Log.ForContext<DataValidationService>());
 
                 // 执行验证
                 var validationResults = validationService.ValidateAllPoints(monitoringPoints, comparisonData);
@@ -399,11 +387,11 @@ namespace DataFixter
                     Console.WriteLine($"验证结果: {result.GetSummary()}");
                 }
 
-                logger.LogInformation("数据验证服务测试完成");
+                logger.Information("数据验证服务测试完成");
             }
             catch (Exception ex)
             {
-                logger.LogError(ex, "测试数据验证服务时发生异常");
+                logger.Error(ex, "测试数据验证服务时发生异常");
             }
         }
 
@@ -485,11 +473,10 @@ namespace DataFixter
         /// <summary>
         /// 测试数据修正服务
         /// </summary>
-        /// <param name="loggerFactory">日志工厂</param>
-        static void TestDataCorrectionService(ILoggerFactory loggerFactory)
+        static void TestDataCorrectionService()
         {
-            var logger = loggerFactory.CreateLogger<Program>();
-            logger.LogInformation("开始测试数据修正服务...");
+            var logger = Log.ForContext<Program>();
+            logger.Information("开始测试数据修正服务...");
 
             try
             {
@@ -498,13 +485,13 @@ namespace DataFixter
                 var comparisonData = CreateTestComparisonData();
 
                 // 创建数据验证服务
-                var validationService = new DataValidationService(loggerFactory.CreateLogger<DataValidationService>());
+                var validationService = new DataValidationService(Log.ForContext<DataValidationService>());
 
                 // 执行验证
                 var validationResults = validationService.ValidateAllPoints(monitoringPoints, comparisonData);
 
                 // 创建数据修正服务
-                var correctionService = new DataCorrectionService(loggerFactory.CreateLogger<DataCorrectionService>());
+                var correctionService = new DataCorrectionService(Log.ForContext<DataCorrectionService>());
 
                 // 执行修正
                 var correctionResult = correctionService.CorrectAllPoints(monitoringPoints, validationResults);
@@ -532,11 +519,11 @@ namespace DataFixter
                 // 输出修正统计
                 Console.WriteLine($"\n修正统计: 总计{statistics.TotalAdjustments}次修正, 涉及{statistics.TotalPoints}个监测点, {statistics.TotalFiles}个文件");
 
-                logger.LogInformation("数据修正服务测试完成");
+                logger.Information("数据修正服务测试完成");
             }
             catch (Exception ex)
             {
-                logger.LogError(ex, "测试数据修正服务时发生异常");
+                logger.Error(ex, "测试数据修正服务时发生异常");
             }
         }
 

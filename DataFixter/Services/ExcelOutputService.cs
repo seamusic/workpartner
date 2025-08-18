@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using DataFixter.Models;
-using Microsoft.Extensions.Logging;
+using Serilog;
 using NPOI.SS.UserModel;
 using NPOI.HSSF.UserModel;
 using NPOI.XSSF.UserModel;
@@ -11,12 +11,11 @@ using NPOI.XSSF.UserModel;
 namespace DataFixter.Services
 {
     /// <summary>
-    /// Excel输出服务
-    /// 实现生成修正后的Excel文件、生成详细的修正报告和统计信息功能
+    /// Excel输出服务，负责生成修正后的Excel文件和修正报告
     /// </summary>
     public class ExcelOutputService
     {
-        private readonly ILogger<ExcelOutputService> _logger;
+        private readonly ILogger _logger;
         private readonly OutputOptions _options;
 
         /// <summary>
@@ -24,7 +23,7 @@ namespace DataFixter.Services
         /// </summary>
         /// <param name="logger">日志记录器</param>
         /// <param name="options">输出选项</param>
-        public ExcelOutputService(ILogger<ExcelOutputService> logger, OutputOptions? options = null)
+        public ExcelOutputService(ILogger logger, OutputOptions? options = null)
         {
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _options = options ?? new OutputOptions();
@@ -48,7 +47,7 @@ namespace DataFixter.Services
 
             try
             {
-                _logger.LogInformation("开始生成修正后的Excel文件，输出目录: {OutputDirectory}", outputDirectory);
+                _logger.Information("开始生成修正后的Excel文件，输出目录: {OutputDirectory}", outputDirectory);
 
                 // 确保输出目录存在
                 Directory.CreateDirectory(outputDirectory);
@@ -73,12 +72,12 @@ namespace DataFixter.Services
 
                         if (processedFiles % 50 == 0)
                         {
-                            _logger.LogInformation("已处理 {ProcessedFiles}/{TotalFiles} 个文件", processedFiles, totalFiles);
+                            _logger.Information("已处理 {ProcessedFiles}/{TotalFiles} 个文件", processedFiles, totalFiles);
                         }
                     }
                     catch (Exception ex)
                     {
-                        _logger.LogError(ex, "生成文件 {FileName} 时发生异常", fileGroup.Key);
+                        _logger.Error(ex, "生成文件 {FileName} 时发生异常", fileGroup.Key);
                         
                         result.AddFileResult(new FileOutputResult
                         {
@@ -89,12 +88,12 @@ namespace DataFixter.Services
                     }
                 }
 
-                _logger.LogInformation("Excel文件生成完成: 总计 {TotalFiles} 个文件, 成功 {SuccessCount} 个", 
+                _logger.Information("Excel文件生成完成: 总计 {TotalFiles} 个文件, 成功 {SuccessCount} 个", 
                     totalFiles, result.FileResults.Count(r => r.Status == OutputStatus.Success));
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "生成修正后的Excel文件时发生异常");
+                _logger.Error(ex, "生成修正后的Excel文件时发生异常");
                 result.Status = OutputStatus.Error;
                 result.Message = $"生成过程中发生异常: {ex.Message}";
             }
@@ -172,7 +171,7 @@ namespace DataFixter.Services
             {
                 result.Status = OutputStatus.Error;
                 result.Message = $"修正文件时发生异常: {ex.Message}";
-                _logger.LogError(ex, "修正文件 {FileName} 时发生异常", originalFileName);
+                _logger.Error(ex, "修正文件 {FileName} 时发生异常", originalFileName);
             }
 
             return result;
@@ -270,7 +269,7 @@ namespace DataFixter.Services
                             var cell = row.GetCell(columnMapping.CurrentPeriodX) ?? row.CreateCell(columnMapping.CurrentPeriodX);
                             var originalValue = cell.NumericCellValue;
                             cell.SetCellValue(data.CurrentPeriodX);
-                            _logger.LogDebug("修正X本期变化量: 行{RowNumber}, 列{ColumnIndex}, {OriginalValue} -> {CorrectedValue}", 
+                            _logger.Debug("修正X本期变化量: 行{RowNumber}, 列{ColumnIndex}, {OriginalValue} -> {CorrectedValue}", 
                                 data.RowNumber, columnMapping.CurrentPeriodX, originalValue, data.CurrentPeriodX);
                             correctedRows++;
                         }
@@ -279,7 +278,7 @@ namespace DataFixter.Services
                             var cell = row.GetCell(columnMapping.CurrentPeriodY) ?? row.CreateCell(columnMapping.CurrentPeriodY);
                             var originalValue = cell.NumericCellValue;
                             cell.SetCellValue(data.CurrentPeriodY);
-                            _logger.LogDebug("修正Y本期变化量: 行{RowNumber}, 列{ColumnIndex}, {OriginalValue} -> {CorrectedValue}", 
+                            _logger.Debug("修正Y本期变化量: 行{RowNumber}, 列{ColumnIndex}, {OriginalValue} -> {CorrectedValue}", 
                                 data.RowNumber, columnMapping.CurrentPeriodY, originalValue, data.CurrentPeriodY);
                             correctedRows++;
                         }
@@ -288,7 +287,7 @@ namespace DataFixter.Services
                             var cell = row.GetCell(columnMapping.CurrentPeriodZ) ?? row.CreateCell(columnMapping.CurrentPeriodZ);
                             var originalValue = cell.NumericCellValue;
                             cell.SetCellValue(data.CurrentPeriodZ);
-                            _logger.LogDebug("修正Z本期变化量: 行{RowNumber}, 列{ColumnIndex}, {OriginalValue} -> {CorrectedValue}", 
+                            _logger.Debug("修正Z本期变化量: 行{RowNumber}, 列{ColumnIndex}, {OriginalValue} -> {CorrectedValue}", 
                                 data.RowNumber, columnMapping.CurrentPeriodZ, originalValue, data.CurrentPeriodZ);
                             correctedRows++;
                         }
@@ -299,7 +298,7 @@ namespace DataFixter.Services
                             var cell = row.GetCell(columnMapping.CumulativeX) ?? row.CreateCell(columnMapping.CumulativeX);
                             var originalValue = cell.NumericCellValue;
                             cell.SetCellValue(data.CumulativeX);
-                            _logger.LogDebug("修正X累计变化量: 行{RowNumber}, 列{ColumnIndex}, {OriginalValue} -> {CorrectedValue}", 
+                            _logger.Debug("修正X累计变化量: 行{RowNumber}, 列{ColumnIndex}, {OriginalValue} -> {CorrectedValue}", 
                                 data.RowNumber, columnMapping.CumulativeX, originalValue, data.CumulativeX);
                             correctedRows++;
                         }
@@ -308,7 +307,7 @@ namespace DataFixter.Services
                             var cell = row.GetCell(columnMapping.CumulativeY) ?? row.CreateCell(columnMapping.CumulativeY);
                             var originalValue = cell.NumericCellValue;
                             cell.SetCellValue(data.CumulativeY);
-                            _logger.LogDebug("修正Y累计变化量: 行{RowNumber}, 列{ColumnIndex}, {OriginalValue} -> {CorrectedValue}", 
+                            _logger.Debug("修正Y累计变化量: 行{RowNumber}, 列{ColumnIndex}, {OriginalValue} -> {CorrectedValue}", 
                                 data.RowNumber, columnMapping.CumulativeY, originalValue, data.CumulativeY);
                             correctedRows++;
                         }
@@ -317,7 +316,7 @@ namespace DataFixter.Services
                             var cell = row.GetCell(columnMapping.CumulativeZ) ?? row.CreateCell(columnMapping.CumulativeZ);
                             var originalValue = cell.NumericCellValue;
                             cell.SetCellValue(data.CumulativeZ);
-                            _logger.LogDebug("修正Z累计变化量: 行{RowNumber}, 列{ColumnIndex}, {OriginalValue} -> {CorrectedValue}", 
+                            _logger.Debug("修正Z累计变化量: 行{RowNumber}, 列{ColumnIndex}, {OriginalValue} -> {CorrectedValue}", 
                                 data.RowNumber, columnMapping.CumulativeZ, originalValue, data.CumulativeZ);
                             correctedRows++;
                         }
@@ -342,7 +341,7 @@ namespace DataFixter.Services
             var headerRow = sheet.GetRow(3);
             if (headerRow == null) 
             {
-                _logger.LogWarning("未找到标题行（第4行）");
+                _logger.Warning("未找到标题行（第4行）");
                 return mapping;
             }
             
@@ -561,7 +560,7 @@ namespace DataFixter.Services
 
             try
             {
-                _logger.LogInformation("开始生成修正报告");
+                _logger.Information("开始生成修正报告");
 
                 // 生成详细报告
                 var detailedReport = GenerateDetailedReport(correctionResult, validationResults);
@@ -583,11 +582,11 @@ namespace DataFixter.Services
                 result.StatisticsReportPath = statisticsPath;
                 result.ExcelReportPath = excelReportPath;
 
-                _logger.LogInformation("修正报告生成完成");
+                _logger.Information("修正报告生成完成");
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "生成修正报告时发生异常");
+                _logger.Error(ex, "生成修正报告时发生异常");
                 result.Status = ReportStatus.Error;
                 result.Message = $"生成报告时发生异常: {ex.Message}";
             }
@@ -733,11 +732,11 @@ namespace DataFixter.Services
             
             if (allCorrections.Count == 0)
             {
-                _logger.LogWarning("没有修正记录需要生成Excel报告");
+                _logger.Warning("没有修正记录需要生成Excel报告");
                 return;
             }
             
-            _logger.LogInformation("开始生成Excel修正报告，总修正记录数: {Count}", allCorrections.Count);
+            _logger.Information("开始生成Excel修正报告，总修正记录数: {Count}", allCorrections.Count);
             
             // 如果数据量超过限制，使用多个工作表或文件
             if (allCorrections.Count > maxRowsPerSheet)
@@ -805,7 +804,7 @@ namespace DataFixter.Services
             using var fileStream = new FileStream(outputPath, FileMode.Create, FileAccess.Write);
             workbook.Write(fileStream);
             
-            _logger.LogInformation("标准Excel报告生成完成，共 {Count} 条记录", corrections.Count);
+            _logger.Information("标准Excel报告生成完成，共 {Count} 条记录", corrections.Count);
         }
         
         /// <summary>
@@ -814,7 +813,7 @@ namespace DataFixter.Services
         private void GenerateLargeExcelReport(List<DataCorrection> allCorrections, string baseOutputPath, int maxRowsPerSheet)
         {
             var totalSheets = (int)Math.Ceiling((double)allCorrections.Count / maxRowsPerSheet);
-            _logger.LogInformation("数据量较大，将生成 {TotalSheets} 个工作表", totalSheets);
+            _logger.Information("数据量较大，将生成 {TotalSheets} 个工作表", totalSheets);
             
             var workbook = new HSSFWorkbook();
             
@@ -870,14 +869,14 @@ namespace DataFixter.Services
                     sheet.SetColumnWidth(i, columnWidths[i] * 256);
                 }
                 
-                _logger.LogInformation("工作表 {SheetName} 生成完成，包含 {Count} 条记录", sheetName, sheetCorrections.Count);
+                _logger.Information("工作表 {SheetName} 生成完成，包含 {Count} 条记录", sheetName, sheetCorrections.Count);
             }
 
             // 保存文件
             using var fileStream = new FileStream(baseOutputPath, FileMode.Create, FileAccess.Write);
             workbook.Write(fileStream);
             
-            _logger.LogInformation("大型Excel报告生成完成，共 {TotalSheets} 个工作表，总计 {TotalRecords} 条记录", 
+            _logger.Information("大型Excel报告生成完成，共 {TotalSheets} 个工作表，总计 {TotalRecords} 条记录", 
                 totalSheets, allCorrections.Count);
         }
     }

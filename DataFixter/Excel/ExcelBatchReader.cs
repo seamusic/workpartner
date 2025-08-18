@@ -3,33 +3,29 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using DataFixter.Models;
-using NPOI.HSSF.UserModel;
 using NPOI.SS.UserModel;
-using Microsoft.Extensions.Logging;
+using NPOI.HSSF.UserModel;
+using Serilog;
 
 namespace DataFixter.Excel
 {
     /// <summary>
-    /// Excel文件批量读取器
-    /// 支持读取指定目录下的所有.xls文件，实现从第5行到第364行的数据提取
+    /// Excel批量读取器，负责批量读取Excel文件并转换为数据模型
     /// </summary>
     public class ExcelBatchReader
     {
-        private readonly ILogger<ExcelBatchReader> _logger;
         private readonly string _directoryPath;
-        private readonly string _fileExtension;
+        private readonly ILogger _logger;
 
         /// <summary>
         /// 构造函数
         /// </summary>
         /// <param name="directoryPath">目录路径</param>
         /// <param name="logger">日志记录器</param>
-        /// <param name="fileExtension">文件扩展名，默认为.xls</param>
-        public ExcelBatchReader(string directoryPath, ILogger<ExcelBatchReader> logger, string fileExtension = "*.xls")
+        public ExcelBatchReader(string directoryPath, ILogger logger)
         {
             _directoryPath = directoryPath ?? throw new ArgumentNullException(nameof(directoryPath));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-            _fileExtension = fileExtension;
         }
 
         /// <summary>
@@ -44,12 +40,12 @@ namespace DataFixter.Excel
             {
                 if (!Directory.Exists(_directoryPath))
                 {
-                    _logger.LogError("目录不存在: {DirectoryPath}", _directoryPath);
+                    _logger.Error("目录不存在: {DirectoryPath}", _directoryPath);
                     return results;
                 }
 
-                var files = Directory.GetFiles(_directoryPath, _fileExtension, SearchOption.TopDirectoryOnly);
-                _logger.LogInformation("找到 {FileCount} 个Excel文件", files.Length);
+                var files = Directory.GetFiles(_directoryPath, "*.xls", SearchOption.TopDirectoryOnly);
+                _logger.Information("找到 {FileCount} 个Excel文件", files.Length);
 
                 foreach (var filePath in files)
                 {
@@ -65,13 +61,13 @@ namespace DataFixter.Excel
                         }
                         else
                         {
-                            _logger.LogWarning("读取文件失败: {FileName}, 错误: {Error}", 
+                            _logger.Warning("读取文件失败: {FileName}, 错误: {Error}", 
                                 Path.GetFileName(filePath), result.ErrorMessage);
                         }
                     }
                     catch (Exception ex)
                     {
-                        _logger.LogError(ex, "读取文件时发生异常: {FilePath}", filePath);
+                        _logger.Error(ex, "读取文件时发生异常: {FilePath}", filePath);
                         results.Add(new ExcelReadResult
                         {
                             FilePath = filePath,
@@ -83,7 +79,7 @@ namespace DataFixter.Excel
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "批量读取Excel文件时发生异常");
+                _logger.Error(ex, "批量读取Excel文件时发生异常");
             }
 
             return results;
@@ -137,7 +133,7 @@ namespace DataFixter.Excel
             catch (Exception ex)
             {
                 result.ErrorMessage = ex.Message;
-                _logger.LogError(ex, "读取Excel文件失败: {FilePath}", filePath);
+                _logger.Error(ex, "读取Excel文件失败: {FilePath}", filePath);
             }
 
             return result;
@@ -218,7 +214,7 @@ namespace DataFixter.Excel
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "提取行数据失败: 行号 {RowNumber}", rowNumber);
+                _logger.Warning(ex, "提取行数据失败: 行号 {RowNumber}", rowNumber);
                 return null;
             }
         }

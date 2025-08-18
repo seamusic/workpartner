@@ -1,5 +1,6 @@
 using Serilog;
 using Serilog.Events;
+using Microsoft.Extensions.Configuration;
 
 namespace DataFixter.Logging
 {
@@ -21,18 +22,16 @@ namespace DataFixter.Logging
                 Directory.CreateDirectory(logDir);
             }
 
+            // 构建配置
+            var configuration = new ConfigurationBuilder()
+                .SetBasePath(Directory.GetCurrentDirectory())
+                .AddJsonFile("appsettings.json", optional: false, reloadOnChange: true)
+                .AddEnvironmentVariables()
+                .Build();
+
             // 配置Serilog
             Log.Logger = new LoggerConfiguration()
-                .MinimumLevel.Debug()
-                .MinimumLevel.Override("Microsoft", LogEventLevel.Information)
-                .WriteTo.Console(
-                    outputTemplate: "[{Timestamp:HH:mm:ss} {Level:u3}] {Message:lj}{NewLine}{Exception}")
-                .WriteTo.File(
-                    path: logFilePath,
-                    rollingInterval: RollingInterval.Day,
-                    outputTemplate: "{Timestamp:yyyy-MM-dd HH:mm:ss.fff zzz} [{Level:u3}] {Message:lj}{NewLine}{Exception}",
-                    retainedFileCountLimit: 30,
-                    fileSizeLimitBytes: 10 * 1024 * 1024) // 10MB
+                .ReadFrom.Configuration(configuration)
                 .CreateLogger();
 
             Log.Information("日志系统已初始化");

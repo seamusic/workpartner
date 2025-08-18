@@ -1,36 +1,35 @@
 using System;
 using System.IO;
+using DataFixter.Models;
 using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.Logging;
+using Serilog;
 
 namespace DataFixter.Services
 {
     /// <summary>
-    /// 配置服务
-    /// 负责读取和管理应用程序配置
+    /// 配置服务，负责读取和管理应用程序配置
     /// </summary>
     public class ConfigurationService
     {
-        private readonly ILogger<ConfigurationService> _logger;
         private readonly IConfiguration _configuration;
+        private readonly ILogger _logger;
 
         /// <summary>
         /// 构造函数
         /// </summary>
         /// <param name="logger">日志记录器</param>
-        public ConfigurationService(ILogger<ConfigurationService> logger)
+        public ConfigurationService(ILogger logger)
         {
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             
             // 构建配置
-            var configBuilder = new ConfigurationBuilder()
+            _configuration = new ConfigurationBuilder()
                 .SetBasePath(Directory.GetCurrentDirectory())
-                .AddJsonFile("appsettings.json", optional: true, reloadOnChange: true)
-                .AddEnvironmentVariables();
-
-            _configuration = configBuilder.Build();
-            
-            _logger.LogInformation("配置服务初始化完成");
+                .AddJsonFile("appsettings.json", optional: false, reloadOnChange: true)
+                .AddEnvironmentVariables()
+                .Build();
+                
+            _logger.Information("配置服务已初始化");
         }
 
         /// <summary>
@@ -55,16 +54,16 @@ namespace DataFixter.Services
                     options.MileageTolerance = section.GetValue<double>("MileageTolerance", 0.01);
                     options.MaxTimeInterval = section.GetValue<double>("MaxTimeInterval", 30.0);
                     
-                    _logger.LogInformation("从配置文件加载验证选项: 累计变化量容差={CumulativeTolerance}", options.CumulativeTolerance);
+                    _logger.Information("从配置文件加载验证选项: 累计变化量容差={CumulativeTolerance}", options.CumulativeTolerance);
                 }
                 else
                 {
-                    _logger.LogWarning("配置文件中未找到ValidationOptions节点，使用默认值");
+                    _logger.Warning("配置文件中未找到ValidationOptions节点，使用默认值");
                 }
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "读取验证选项配置时发生异常，使用默认值");
+                _logger.Warning(ex, "读取验证选项配置时发生异常，使用默认值");
             }
 
             return options;
@@ -89,16 +88,16 @@ namespace DataFixter.Services
                     options.MaxCumulativeValue = section.GetValue<double>("MaxCumulativeValue", 4.0);
                     options.EnableMinimalModification = section.GetValue<bool>("EnableMinimalModification", true);
                     
-                    _logger.LogInformation("从配置文件加载修正选项: 累计变化量容差={CumulativeTolerance}", options.CumulativeTolerance);
+                    _logger.Information("从配置文件加载修正选项: 累计变化量容差={CumulativeTolerance}", options.CumulativeTolerance);
                 }
                 else
                 {
-                    _logger.LogWarning("配置文件中未找到CorrectionOptions节点，使用默认值");
+                    _logger.Warning("配置文件中未找到CorrectionOptions节点，使用默认值");
                 }
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "读取修正选项配置时发生异常，使用默认值");
+                _logger.Warning(ex, "读取修正选项配置时发生异常，使用默认值");
             }
 
             return options;
@@ -122,16 +121,16 @@ namespace DataFixter.Services
                     options.AddCorrectionMarks = section.GetValue<bool>("AddCorrectionMarks", true);
                     options.OutputEncoding = section.GetValue<string>("OutputEncoding", "UTF-8");
                     
-                    _logger.LogInformation("从配置文件加载输出选项: 保留原始格式={PreserveOriginalFormat}", options.PreserveOriginalFormat);
+                    _logger.Information("从配置文件加载输出选项: 保留原始格式={PreserveOriginalFormat}", options.PreserveOriginalFormat);
                 }
                 else
                 {
-                    _logger.LogWarning("配置文件中未找到OutputOptions节点，使用默认值");
+                    _logger.Warning("配置文件中未找到OutputOptions节点，使用默认值");
                 }
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "读取输出选项配置时发生异常，使用默认值");
+                _logger.Warning(ex, "读取输出选项配置时发生异常，使用默认值");
             }
 
             return options;
@@ -152,7 +151,7 @@ namespace DataFixter.Services
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "读取配置值 {Key} 时发生异常，使用默认值 {DefaultValue}", key, defaultValue);
+                _logger.Warning(ex, "读取配置值 {Key} 时发生异常，使用默认值 {DefaultValue}", key, defaultValue);
                 return defaultValue;
             }
         }
@@ -170,7 +169,7 @@ namespace DataFixter.Services
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "读取连接字符串 {Name} 时发生异常", name);
+                _logger.Warning(ex, "读取连接字符串 {Name} 时发生异常", name);
                 return string.Empty;
             }
         }
