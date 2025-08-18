@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using DataFixter.Models;
+using DataFixter.Utils;
 using Microsoft.Extensions.Logging;
 
 namespace DataFixter.Services
@@ -121,8 +122,10 @@ namespace DataFixter.Services
                     var comparisonPointData = comparisonData
                         .Where(pd => string.Equals(pd.PointName, point.PointName, StringComparison.OrdinalIgnoreCase) && pd.FormattedTime == result.FormattedTime)
                         .ToList();
+                    // 取上一期数据，如果找不到，也可以修改
+                    var perviousData = GetPreviousPeriodData(point, result.FormattedTime);
                     // 如果找不到，表示可以修改
-                    if (comparisonPointData.Count == 0)
+                    if (comparisonPointData.Count == 0 || perviousData == null)
                     {
                         result.CanAdjustment = true;
                     }
@@ -150,6 +153,24 @@ namespace DataFixter.Services
             }
 
             return results;
+        }
+
+        private PeriodData? GetPreviousPeriodData(MonitoringPoint point, string formattedTime)
+        {
+            // 将 formattedTime 转换为 DateTime 进行比较
+            if (!DateTime.TryParse(formattedTime, out DateTime targetTime))
+            {
+                _logger.LogWarning("无法解析时间格式: {FormattedTime}", formattedTime);
+                return null;
+            }
+
+            // 按时间排序，找到早于目标时间的最近一期数据
+            var previousPeriod = point.PeriodDataList
+                .Where(pd => pd.FileInfo?.FullDateTime != null && pd.FileInfo.FullDateTime < targetTime)
+                .OrderByDescending(pd => pd.FileInfo.FullDateTime)
+                .FirstOrDefault();
+
+            return previousPeriod;
         }
 
         /// <summary>
@@ -245,8 +266,8 @@ namespace DataFixter.Services
         {
             try
             {
-                var expectedCumulative = previousCumulative + currentPeriodValue;
-                var difference = Math.Abs(currentCumulative - expectedCumulative);
+                var expectedCumulative = FloatingPointUtils.ToDouble(FloatingPointUtils.SafeAdd(previousCumulative, currentPeriodValue));
+                var difference = FloatingPointUtils.SafeAbsoluteDifference(currentCumulative, expectedCumulative);
 
                 // 检查是否在容差范围内
                 if (difference <= _options.CumulativeTolerance)
@@ -392,9 +413,9 @@ namespace DataFixter.Services
             try
             {
                 // 检查对比数据是否为空
-                if (Math.Abs(comparisonData.CurrentPeriodX) < _options.MinValueThreshold &&
-                    Math.Abs(comparisonData.CurrentPeriodY) < _options.MinValueThreshold &&
-                    Math.Abs(comparisonData.CurrentPeriodZ) < _options.MinValueThreshold)
+                if (FloatingPointUtils.SafeAbs(comparisonData.CurrentPeriodX) < _options.MinValueThreshold &&
+                    FloatingPointUtils.SafeAbs(comparisonData.CurrentPeriodY) < _options.MinValueThreshold &&
+                    FloatingPointUtils.SafeAbs(comparisonData.CurrentPeriodZ) < _options.MinValueThreshold)
                 {
                     return new ValidationResult(ValidationStatus.CanAdjustment, "对比数据为空",
                         "对比数据中所有方向的变化量都为空")
@@ -431,7 +452,7 @@ namespace DataFixter.Services
                 foreach (var comparisonData in comparisonDataList)
                 {
                     // 检查里程是否一致
-                    if (Math.Abs(point.Mileage - comparisonData.Mileage) > _options.MileageTolerance)
+                    if (FloatingPointUtils.SafeAbsoluteDifference(point.Mileage, comparisonData.Mileage) > _options.MileageTolerance)
                     {
                         results.Add(new ValidationResult(ValidationStatus.NeedsAdjustment, "里程不一致",
                             $"监测点里程与对比数据不一致")
@@ -468,9 +489,9 @@ namespace DataFixter.Services
             try
             {
                 // 检查本期变化量是否在合理范围内
-                if (Math.Abs(comparisonData.CurrentPeriodX) > _options.MaxCurrentPeriodValue ||
-                    Math.Abs(comparisonData.CurrentPeriodY) > _options.MaxCurrentPeriodValue ||
-                    Math.Abs(comparisonData.CurrentPeriodZ) > _options.MaxCurrentPeriodValue)
+                if (FloatingPointUtils.SafeAbs(comparisonData.CurrentPeriodX) > _options.MaxCurrentPeriodValue ||
+                    FloatingPointUtils.SafeAbs(comparisonData.CurrentPeriodY) > _options.MaxCurrentPeriodValue ||
+                    FloatingPointUtils.SafeAbs(comparisonData.CurrentPeriodZ) > _options.MaxCurrentPeriodValue)
                 {
                     return new ValidationResult(ValidationStatus.NeedsAdjustment, "数据量级异常",
                         "对比数据中本期变化量超出正常范围")
@@ -555,9 +576,9 @@ namespace DataFixter.Services
             try
             {
                 // 检查本期变化量是否在合理范围内
-                if (Math.Abs(currentPeriod.CurrentPeriodX) > _options.MaxCurrentPeriodValue ||
-                    Math.Abs(currentPeriod.CurrentPeriodY) > _options.MaxCurrentPeriodValue ||
-                    Math.Abs(currentPeriod.CurrentPeriodZ) > _options.MaxCurrentPeriodValue)
+                if (FloatingPointUtils.SafeAbs(currentPeriod.CurrentPeriodX) > _options.MaxCurrentPeriodValue ||
+                    FloatingPointUtils.SafeAbs(currentPeriod.CurrentPeriodY) > _options.MaxCurrentPeriodValue ||
+                    FloatingPointUtils.SafeAbs(currentPeriod.CurrentPeriodZ) > _options.MaxCurrentPeriodValue)
                 {
                     return new ValidationResult(ValidationStatus.NeedsAdjustment, "数据跳跃异常",
                         "本期变化量超出正常范围")

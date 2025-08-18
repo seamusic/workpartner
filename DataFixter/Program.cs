@@ -14,7 +14,7 @@ namespace DataFixter
             Console.WriteLine();
 
             // 添加测试修正算法的调用
-            TestCorrectionAlgorithm();
+            //TestCorrectionAlgorithm();
             Console.WriteLine();
 
             try

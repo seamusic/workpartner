@@ -65,24 +65,28 @@ namespace DataFixter.Services
 
                         if (validationByPoint.TryGetValue(point.PointName, out var pointValidations))
                         {
-                            // 检查是否可以修正
-                            var cando = validationResults.Any(x => x.PointName == point.PointName && x.CanAdjustment);
+                            var currentResult = validationResults.Where(x => x.PointName == point.PointName).ToList();
                             var need = validationResults.Count(x =>
-                                x.PointName == point.PointName && x.Status == ValidationStatus.NeedsAdjustment);
-                            if (cando)
+                                x.PointName == point.PointName);
+                            if (currentResult.Count > 0)
                             {
-                                var pointResult = CorrectPoint(point);
-                                result.AddPointResult(pointResult);
-                            }
-                            else if (need > 0)
-                            {
-
-                                result.AddPointResult(new PointCorrectionResult
+                                var perviousData1 = GetPreviousPeriodData(point, currentResult[0].FormattedTime);
+                                // 检查是否可以修正
+                                var canFix = currentResult.Any(x => x.PointName == point.PointName && x.CanAdjustment);
+                                if (canFix)
                                 {
-                                    PointName = point.PointName,
-                                    Status = CorrectionStatus.Skipped,
-                                    Message = $"有{need}个错误需要修正，但不在许可范围，跳过处理"
-                                });
+                                    var pointResult = CorrectPoint(point);
+                                    result.AddPointResult(pointResult);
+                                }
+                                else
+                                {
+                                    result.AddPointResult(new PointCorrectionResult
+                                    {
+                                        PointName = point.PointName,
+                                        Status = CorrectionStatus.Skipped,
+                                        Message = $"有{need}个错误需要修正，但不在许可范围，跳过处理"
+                                    });
+                                }
                             }
                             else
                             {
@@ -386,8 +390,8 @@ namespace DataFixter.Services
                         var maxAllowedCumulative = _options.MaxCumulativeValue * Math.Sign(correctedCumulative);
                         var adjustedPeriodValue = maxAllowedCumulative - expectedCumulatives[i - 1];
 
-                                            // 检查调整后的本期变化量是否合理
-                    if (FloatingPointUtils.IsLessThanOrEqual(FloatingPointUtils.SafeAbs(adjustedPeriodValue), _options.MaxCurrentPeriodValue, _options.CumulativeTolerance))
+                        // 检查调整后的本期变化量是否合理
+                        if (FloatingPointUtils.IsLessThanOrEqual(FloatingPointUtils.SafeAbs(adjustedPeriodValue), _options.MaxCurrentPeriodValue, _options.CumulativeTolerance))
                         {
                             var correction = new DataCorrection
                             {
@@ -494,7 +498,7 @@ namespace DataFixter.Services
             var maxPeriodValue = originalValues.Any() ? FloatingPointUtils.SafeMax(FloatingPointUtils.SafeAbs(originalValues.Max()), FloatingPointUtils.SafeAbs(originalValues.Min())) : 2.0;
 
             // 确保标准差不为0
-            if (FloatingPointUtils.IsLessThan(stdPeriodValue, 0.1, _options.CumulativeTolerance)) 
+            if (FloatingPointUtils.IsLessThan(stdPeriodValue, 0.1, _options.CumulativeTolerance))
                 stdPeriodValue = maxPeriodValue * 0.3;
 
             var random = new Random();
@@ -804,6 +808,24 @@ namespace DataFixter.Services
             // 这里需要从外部传入完整的监测点数据来获取上一期
             // 暂时返回null，实际使用时需要重构数据传递方式
             return null;
+        }
+
+        private PeriodData? GetPreviousPeriodData(MonitoringPoint point, string formattedTime)
+        {
+            // 将 formattedTime 转换为 DateTime 进行比较
+            if (!DateTime.TryParse(formattedTime, out DateTime targetTime))
+            {
+                _logger.LogWarning("无法解析时间格式: {FormattedTime}", formattedTime);
+                return null;
+            }
+
+            // 按时间排序，找到早于目标时间的最近一期数据
+            var previousPeriod = point.PeriodDataList
+                .Where(pd => pd.FileInfo?.FullDateTime != null && pd.FileInfo.FullDateTime < targetTime)
+                .OrderByDescending(pd => pd.FileInfo.FullDateTime)
+                .FirstOrDefault();
+
+            return previousPeriod;
         }
 
         /// <summary>
@@ -1120,41 +1142,41 @@ namespace DataFixter.Services
                         var current = sortedData[i];
                         var previous = sortedData[i - 1];
 
-                                            // 验证X方向
-                    var expectedCumulativeX = previous.CumulativeX + current.CurrentPeriodX;
-                    var actualCumulativeX = current.CumulativeX;
-                    var xDifference = FloatingPointUtils.SafeAbsoluteDifference(expectedCumulativeX, actualCumulativeX);
+                        // 验证X方向
+                        var expectedCumulativeX = previous.CumulativeX + current.CurrentPeriodX;
+                        var actualCumulativeX = current.CumulativeX;
+                        var xDifference = FloatingPointUtils.SafeAbsoluteDifference(expectedCumulativeX, actualCumulativeX);
 
-                    if (FloatingPointUtils.IsGreaterThan(xDifference, _options.CumulativeTolerance, _options.CumulativeTolerance))
-                    {
-                        result.SetFailure($"第{i}期X方向数据不一致: 期望累计值={expectedCumulativeX:F6}, 实际累计值={actualCumulativeX:F6}, 差异={xDifference:F6}");
-                        result.AddFailedValue($"第{i}期X累计值", actualCumulativeX);
-                        result.AddExpectedValue($"第{i}期X累计值", expectedCumulativeX);
-                    }
+                        if (FloatingPointUtils.IsGreaterThan(xDifference, _options.CumulativeTolerance, _options.CumulativeTolerance))
+                        {
+                            result.SetFailure($"第{i}期X方向数据不一致: 期望累计值={expectedCumulativeX:F6}, 实际累计值={actualCumulativeX:F6}, 差异={xDifference:F6}");
+                            result.AddFailedValue($"第{i}期X累计值", actualCumulativeX);
+                            result.AddExpectedValue($"第{i}期X累计值", expectedCumulativeX);
+                        }
 
-                    // 验证Y方向
-                    var expectedCumulativeY = previous.CumulativeY + current.CurrentPeriodY;
-                    var actualCumulativeY = current.CumulativeY;
-                    var yDifference = FloatingPointUtils.SafeAbsoluteDifference(expectedCumulativeY, actualCumulativeY);
+                        // 验证Y方向
+                        var expectedCumulativeY = previous.CumulativeY + current.CurrentPeriodY;
+                        var actualCumulativeY = current.CumulativeY;
+                        var yDifference = FloatingPointUtils.SafeAbsoluteDifference(expectedCumulativeY, actualCumulativeY);
 
-                    if (FloatingPointUtils.IsGreaterThan(yDifference, _options.CumulativeTolerance, _options.CumulativeTolerance))
-                    {
-                        result.SetFailure($"第{i}期Y方向数据不一致: 期望累计值={expectedCumulativeY:F6}, 实际累计值={actualCumulativeY:F6}, 差异={yDifference:F6}");
-                        result.AddFailedValue($"第{i}期Y累计值", actualCumulativeY);
-                        result.AddExpectedValue($"第{i}期Y累计值", expectedCumulativeY);
-                    }
+                        if (FloatingPointUtils.IsGreaterThan(yDifference, _options.CumulativeTolerance, _options.CumulativeTolerance))
+                        {
+                            result.SetFailure($"第{i}期Y方向数据不一致: 期望累计值={expectedCumulativeY:F6}, 实际累计值={actualCumulativeY:F6}, 差异={yDifference:F6}");
+                            result.AddFailedValue($"第{i}期Y累计值", actualCumulativeY);
+                            result.AddExpectedValue($"第{i}期Y累计值", expectedCumulativeY);
+                        }
 
-                    // 验证Z方向
-                    var expectedCumulativeZ = previous.CumulativeZ + current.CurrentPeriodZ;
-                    var actualCumulativeZ = current.CumulativeZ;
-                    var zDifference = FloatingPointUtils.SafeAbsoluteDifference(expectedCumulativeZ, actualCumulativeZ);
+                        // 验证Z方向
+                        var expectedCumulativeZ = previous.CumulativeZ + current.CurrentPeriodZ;
+                        var actualCumulativeZ = current.CumulativeZ;
+                        var zDifference = FloatingPointUtils.SafeAbsoluteDifference(expectedCumulativeZ, actualCumulativeZ);
 
-                    if (FloatingPointUtils.IsGreaterThan(zDifference, _options.CumulativeTolerance, _options.CumulativeTolerance))
-                    {
-                        result.SetFailure($"第{i}期Z方向数据不一致: 期望累计值={expectedCumulativeZ:F6}, 实际累计值={actualCumulativeZ:F6}, 差异={zDifference:F6}");
-                        result.AddFailedValue($"第{i}期Z累计值", actualCumulativeZ);
-                        result.AddExpectedValue($"第{i}期Z累计值", expectedCumulativeZ);
-                    }
+                        if (FloatingPointUtils.IsGreaterThan(zDifference, _options.CumulativeTolerance, _options.CumulativeTolerance))
+                        {
+                            result.SetFailure($"第{i}期Z方向数据不一致: 期望累计值={expectedCumulativeZ:F6}, 实际累计值={actualCumulativeZ:F6}, 差异={zDifference:F6}");
+                            result.AddFailedValue($"第{i}期Z累计值", actualCumulativeZ);
+                            result.AddExpectedValue($"第{i}期Z累计值", expectedCumulativeZ);
+                        }
                     }
 
                     if (result.Status == ValidationStatus.Valid)

@@ -1,11 +1,12 @@
 using System;
 using System.Linq;
+using System.Numerics;
 
 namespace DataFixter.Utils
 {
     /// <summary>
-    /// 浮点数计算工具类
-    /// 提供安全的浮点数比较和计算操作，避免浮点数精度误差
+    /// 高精度数值计算工具类
+    /// 使用decimal类型进行内部计算，避免浮点数精度误差
     /// </summary>
     public static class FloatingPointUtils
     {
@@ -23,6 +24,236 @@ namespace DataFixter.Utils
         /// 高精度计算的容差
         /// </summary>
         public const double HighPrecisionTolerance = 1e-12;
+
+        /// <summary>
+        /// decimal类型的默认精度
+        /// </summary>
+        public const int DefaultDecimalPrecision = 28;
+
+        /// <summary>
+        /// 将double转换为decimal，保持精度
+        /// </summary>
+        /// <param name="value">double值</param>
+        /// <returns>decimal值</returns>
+        public static decimal ToDecimal(double value)
+        {
+            if (double.IsNaN(value) || double.IsInfinity(value))
+                throw new ArgumentException("无法将NaN或Infinity转换为decimal", nameof(value));
+            
+            return Convert.ToDecimal(value);
+        }
+
+        /// <summary>
+        /// 将decimal转换为double，用于输出
+        /// </summary>
+        /// <param name="value">decimal值</param>
+        /// <returns>double值</returns>
+        public static double ToDouble(decimal value)
+        {
+            return Convert.ToDouble(value);
+        }
+
+        /// <summary>
+        /// 使用decimal进行高精度加法运算
+        /// </summary>
+        /// <param name="a">第一个值</param>
+        /// <param name="b">第二个值</param>
+        /// <returns>高精度结果</returns>
+        public static decimal SafeAdd(double a, double b)
+        {
+            try
+            {
+                var decimalA = ToDecimal(a);
+                var decimalB = ToDecimal(b);
+                return decimalA + decimalB;
+            }
+            catch (ArgumentException)
+            {
+                return decimal.Zero;
+            }
+        }
+
+        /// <summary>
+        /// 使用decimal进行高精度减法运算
+        /// </summary>
+        /// <param name="a">第一个值</param>
+        /// <param name="b">第二个值</param>
+        /// <returns>高精度结果</returns>
+        public static decimal SafeSubtract(double a, double b)
+        {
+            try
+            {
+                var decimalA = ToDecimal(a);
+                var decimalB = ToDecimal(b);
+                return decimalA - decimalB;
+            }
+            catch (ArgumentException)
+            {
+                return decimal.Zero;
+            }
+        }
+
+        /// <summary>
+        /// 使用decimal进行高精度乘法运算
+        /// </summary>
+        /// <param name="a">第一个值</param>
+        /// <param name="b">第二个值</param>
+        /// <returns>高精度结果</returns>
+        public static decimal SafeMultiply(double a, double b)
+        {
+            try
+            {
+                var decimalA = ToDecimal(a);
+                var decimalB = ToDecimal(b);
+                return decimalA * decimalB;
+            }
+            catch (ArgumentException)
+            {
+                return decimal.Zero;
+            }
+        }
+
+        /// <summary>
+        /// 使用decimal进行高精度除法运算
+        /// </summary>
+        /// <param name="a">第一个值</param>
+        /// <param name="b">第二个值</param>
+        /// <returns>高精度结果</returns>
+        public static decimal SafeDivide(double a, double b)
+        {
+            try
+            {
+                var decimalA = ToDecimal(a);
+                var decimalB = ToDecimal(b);
+                
+                if (decimalB == 0)
+                    throw new DivideByZeroException("除数不能为零");
+                
+                return decimalA / decimalB;
+            }
+            catch (ArgumentException)
+            {
+                return decimal.Zero;
+            }
+        }
+
+        /// <summary>
+        /// 高精度四舍五入，避免浮点数精度问题
+        /// </summary>
+        /// <param name="value">值</param>
+        /// <param name="digits">小数位数</param>
+        /// <returns>四舍五入后的值</returns>
+        public static double SafeRound(double value, int digits = 0)
+        {
+            try
+            {
+                var decimalValue = ToDecimal(value);
+                var rounded = Math.Round(decimalValue, digits, MidpointRounding.AwayFromZero);
+                return ToDouble(rounded);
+            }
+            catch (ArgumentException)
+            {
+                return value;
+            }
+        }
+
+        /// <summary>
+        /// 高精度截断小数位
+        /// </summary>
+        /// <param name="value">值</param>
+        /// <param name="digits">保留的小数位数</param>
+        /// <returns>截断后的值</returns>
+        public static double SafeTruncate(double value, int digits = 0)
+        {
+            try
+            {
+                var decimalValue = ToDecimal(value);
+                var multiplier = (decimal)Math.Pow(10, digits);
+                var scaled = decimal.Truncate(decimalValue * multiplier);
+                var result = scaled / multiplier;
+                return ToDouble(result);
+            }
+            catch (ArgumentException)
+            {
+                return value;
+            }
+        }
+
+        /// <summary>
+        /// 高精度计算平均值
+        /// </summary>
+        /// <param name="values">值列表</param>
+        /// <returns>平均值</returns>
+        public static double SafeAverage(params double[] values)
+        {
+            if (values == null || values.Length == 0)
+                return double.NaN;
+
+            try
+            {
+                var decimalValues = values.Select(v => ToDecimal(v)).ToArray();
+                var sum = decimalValues.Aggregate(decimal.Zero, (acc, val) => acc + val);
+                var average = sum / decimalValues.Length;
+                return ToDouble(average);
+            }
+            catch (ArgumentException)
+            {
+                return values.Average();
+            }
+        }
+
+        /// <summary>
+        /// 高精度计算总和
+        /// </summary>
+        /// <param name="values">值列表</param>
+        /// <returns>总和</returns>
+        public static double SafeSum(params double[] values)
+        {
+            if (values == null || values.Length == 0)
+                return 0.0;
+
+            try
+            {
+                var decimalValues = values.Select(v => ToDecimal(v)).ToArray();
+                var sum = decimalValues.Aggregate(decimal.Zero, (acc, val) => acc + val);
+                return ToDouble(sum);
+            }
+            catch (ArgumentException)
+            {
+                return values.Sum();
+            }
+        }
+
+        /// <summary>
+        /// 高精度计算差值
+        /// </summary>
+        /// <param name="a">第一个值</param>
+        /// <param name="b">第二个值</param>
+        /// <returns>差值</returns>
+        public static double SafeDifference(double a, double b)
+        {
+            try
+            {
+                var result = SafeSubtract(a, b);
+                return ToDouble(result);
+            }
+            catch
+            {
+                return a - b;
+            }
+        }
+
+        /// <summary>
+        /// 高精度计算绝对差值
+        /// </summary>
+        /// <param name="a">第一个值</param>
+        /// <param name="b">第二个值</param>
+        /// <returns>绝对差值</returns>
+        public static double SafeAbsoluteDifference(double a, double b)
+        {
+            var diff = SafeDifference(a, b);
+            return Math.Abs(diff);
+        }
 
         /// <summary>
         /// 安全地比较两个浮点数是否相等
@@ -112,38 +343,6 @@ namespace DataFixter.Utils
         public static bool IsLessThanOrEqual(double a, double b, double tolerance = DefaultTolerance)
         {
             return a < b || AreEqual(a, b, tolerance);
-        }
-
-        /// <summary>
-        /// 安全地计算两个浮点数的差值
-        /// </summary>
-        /// <param name="a">第一个值</param>
-        /// <param name="b">第二个值</param>
-        /// <returns>差值</returns>
-        public static double SafeDifference(double a, double b)
-        {
-            if (double.IsNaN(a) || double.IsNaN(b))
-                return double.NaN;
-
-            if (double.IsInfinity(a) || double.IsInfinity(b))
-            {
-                if (double.IsInfinity(a) && double.IsInfinity(b))
-                    return a == b ? 0.0 : double.PositiveInfinity;
-                return double.PositiveInfinity;
-            }
-
-            return a - b;
-        }
-
-        /// <summary>
-        /// 安全地计算两个浮点数的绝对差值
-        /// </summary>
-        /// <param name="a">第一个值</param>
-        /// <param name="b">第二个值</param>
-        /// <returns>绝对差值</returns>
-        public static double SafeAbsoluteDifference(double a, double b)
-        {
-            return Math.Abs(SafeDifference(a, b));
         }
 
         /// <summary>
@@ -301,45 +500,6 @@ namespace DataFixter.Utils
         }
 
         /// <summary>
-        /// 安全地四舍五入浮点数
-        /// </summary>
-        /// <param name="value">值</param>
-        /// <param name="digits">小数位数</param>
-        /// <returns>四舍五入后的值</returns>
-        public static double SafeRound(double value, int digits = 0)
-        {
-            if (double.IsNaN(value) || double.IsInfinity(value))
-                return value;
-
-            // 处理精度问题：先乘以10^digits，四舍五入，再除以10^digits
-            var multiplier = Math.Pow(10, digits);
-            var scaledValue = value * multiplier;
-            
-            // 使用MidpointRounding.AwayFromZero避免银行家舍入法的问题
-            var roundedScaled = Math.Round(scaledValue, MidpointRounding.AwayFromZero);
-            
-            return roundedScaled / multiplier;
-        }
-
-        /// <summary>
-        /// 安全地计算浮点数的平均值
-        /// </summary>
-        /// <param name="values">值列表</param>
-        /// <returns>平均值</returns>
-        public static double SafeAverage(params double[] values)
-        {
-            if (values == null || values.Length == 0)
-                return double.NaN;
-
-            var validValues = values.Where(v => !double.IsNaN(v) && !double.IsInfinity(v)).ToArray();
-            
-            if (validValues.Length == 0)
-                return double.NaN;
-
-            return validValues.Average();
-        }
-
-        /// <summary>
         /// 安全地计算浮点数的标准差
         /// </summary>
         /// <param name="values">值列表</param>
@@ -413,6 +573,44 @@ namespace DataFixter.Utils
             }
 
             return SafeMax(min, SafeMin(value, max));
+        }
+
+        /// <summary>
+        /// 格式化数值，避免科学计数法
+        /// </summary>
+        /// <param name="value">值</param>
+        /// <param name="digits">小数位数</param>
+        /// <returns>格式化后的字符串</returns>
+        public static string FormatNumber(double value, int digits = 6)
+        {
+            if (double.IsNaN(value) || double.IsInfinity(value))
+                return value.ToString();
+
+            try
+            {
+                var decimalValue = ToDecimal(value);
+                var rounded = Math.Round(decimalValue, digits, MidpointRounding.AwayFromZero);
+                return rounded.ToString($"F{digits}");
+            }
+            catch
+            {
+                return value.ToString($"F{digits}");
+            }
+        }
+
+        /// <summary>
+        /// 检查数值是否在合理范围内
+        /// </summary>
+        /// <param name="value">值</param>
+        /// <param name="min">最小值</param>
+        /// <param name="max">最大值</param>
+        /// <returns>是否在范围内</returns>
+        public static bool IsInRange(double value, double min, double max)
+        {
+            if (double.IsNaN(value) || double.IsInfinity(value))
+                return false;
+
+            return value >= min && value <= max;
         }
     }
 }
