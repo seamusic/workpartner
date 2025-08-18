@@ -618,11 +618,13 @@ namespace DataFixter.Services
             var validCount = validationResults.Count(v => v.Status == ValidationStatus.Valid);
             var invalidCount = validationResults.Count(v => v.Status == ValidationStatus.Invalid);
             var needsAdjustmentCount = validationResults.Count(v => v.Status == ValidationStatus.NeedsAdjustment);
-            
+            var canAdjustmentCount = validationResults.Count(v => v.CanAdjustment);
+
             report.AppendLine("【验证结果统计】");
             report.AppendLine($"验证通过: {validCount} 条");
             report.AppendLine($"验证失败: {invalidCount} 条");
             report.AppendLine($"需要修正: {needsAdjustmentCount} 条");
+            report.AppendLine($"可以修正: {canAdjustmentCount} 条");
             report.AppendLine();
 
                          // 修正详情

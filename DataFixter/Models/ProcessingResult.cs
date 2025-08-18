@@ -90,8 +90,9 @@ namespace DataFixter.Models
                 var validCount = ValidationResults.Count(v => v.Status == ValidationStatus.Valid);
                 var invalidCount = ValidationResults.Count(v => v.Status == ValidationStatus.Invalid);
                 var needsAdjustmentCount = ValidationResults.Count(v => v.Status == ValidationStatus.NeedsAdjustment);
+                var canAdjustment = ValidationResults.Count(v => v.Status == ValidationStatus.CanAdjustment);
 
-                summary += $"验证结果: 通过 {validCount} 条, 失败 {invalidCount} 条, 需要修正 {needsAdjustmentCount} 条\n";
+                summary += $"验证结果: 通过 {validCount} 条, 失败 {invalidCount} 条, 需要修正 {needsAdjustmentCount} 条，可以修正 {canAdjustment}\n";
             }
 
             if (CorrectionResult != null)
@@ -121,7 +122,7 @@ namespace DataFixter.Models
         public string GetDetailedStatistics()
         {
             var stats = new System.Text.StringBuilder();
-            
+
             stats.AppendLine("=== 详细统计信息 ===");
             stats.AppendLine($"处理开始时间: {StartTime:yyyy-MM-dd HH:mm:ss}");
             if (EndTime.HasValue)

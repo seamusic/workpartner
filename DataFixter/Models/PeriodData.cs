@@ -12,7 +12,7 @@ namespace DataFixter.Models
         /// <summary>
         /// 文件信息
         /// </summary>
-        public FileInfo? FileInfo { get; set; }
+        public ExcelFileInfo? FileInfo { get; set; }
 
         /// <summary>
         /// 数据行号（在Excel中的行号，从1开始）
@@ -111,7 +111,7 @@ namespace DataFixter.Models
         /// </summary>
         /// <param name="fileInfo">文件信息</param>
         /// <param name="rowNumber">行号</param>
-        public PeriodData(FileInfo fileInfo, int rowNumber)
+        public PeriodData(ExcelFileInfo fileInfo, int rowNumber)
         {
             FileInfo = fileInfo;
             RowNumber = rowNumber;

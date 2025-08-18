@@ -77,6 +77,11 @@ namespace DataFixter.Models
     public enum CorrectionType
     {
         /// <summary>
+        /// 不修正
+        /// </summary>
+        None,
+
+        /// <summary>
         /// 本期变化量
         /// </summary>
         CurrentPeriodValue,

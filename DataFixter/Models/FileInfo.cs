@@ -7,7 +7,7 @@ namespace DataFixter.Models
     /// 文件信息模型类
     /// 解析文件名中的日期、时间、项目名称，支持时间排序
     /// </summary>
-    public class FileInfo : IComparable<FileInfo>, IEquatable<FileInfo>
+    public class ExcelFileInfo : IComparable<ExcelFileInfo>, IEquatable<ExcelFileInfo>
     {
         /// <summary>
         /// 原始文件名
@@ -50,7 +50,7 @@ namespace DataFixter.Models
         /// <param name="filePath">文件完整路径</param>
         /// <param name="fileSize">文件大小</param>
         /// <param name="lastModified">最后修改时间</param>
-        public FileInfo(string filePath, long fileSize, DateTime lastModified)
+        public ExcelFileInfo(string filePath, long fileSize, DateTime lastModified)
         {
             FullPath = filePath;
             FileSize = fileSize;
@@ -156,7 +156,7 @@ namespace DataFixter.Models
         /// <summary>
         /// 比较两个文件信息（按时间排序）
         /// </summary>
-        public int CompareTo(FileInfo? other)
+        public int CompareTo(ExcelFileInfo? other)
         {
             if (other == null) return 1;
             
@@ -171,7 +171,7 @@ namespace DataFixter.Models
         /// <summary>
         /// 比较两个文件信息是否相等
         /// </summary>
-        public bool Equals(FileInfo? other)
+        public bool Equals(ExcelFileInfo? other)
         {
             if (other == null) return false;
             return FullPath.Equals(other.FullPath, StringComparison.OrdinalIgnoreCase);
@@ -182,7 +182,7 @@ namespace DataFixter.Models
         /// </summary>
         public override bool Equals(object? obj)
         {
-            return Equals(obj as FileInfo);
+            return Equals(obj as ExcelFileInfo);
         }
 
         /// <summary>
@@ -204,22 +204,22 @@ namespace DataFixter.Models
         /// <summary>
         /// 重载比较操作符
         /// </summary>
-        public static bool operator <(FileInfo? left, FileInfo? right)
+        public static bool operator <(ExcelFileInfo? left, ExcelFileInfo? right)
         {
             return left?.CompareTo(right) < 0;
         }
 
-        public static bool operator <=(FileInfo? left, FileInfo? right)
+        public static bool operator <=(ExcelFileInfo? left, ExcelFileInfo? right)
         {
             return left?.CompareTo(right) <= 0;
         }
 
-        public static bool operator >(FileInfo? left, FileInfo? right)
+        public static bool operator >(ExcelFileInfo? left, ExcelFileInfo? right)
         {
             return left?.CompareTo(right) > 0;
         }
 
-        public static bool operator >=(FileInfo? left, FileInfo? right)
+        public static bool operator >=(ExcelFileInfo? left, ExcelFileInfo? right)
         {
             return left?.CompareTo(right) >= 0;
         }

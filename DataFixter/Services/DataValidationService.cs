@@ -58,7 +58,7 @@ namespace DataFixter.Services
                     catch (Exception ex)
                     {
                         _logger.LogError(ex, "验证监测点 {PointName} 时发生异常", point.PointName);
-                        
+
                         // 添加验证失败的结果
                         validationResults.Add(new ValidationResult(ValidationStatus.Invalid, "系统异常", $"验证过程中发生异常: {ex.Message}")
                         {
@@ -68,7 +68,7 @@ namespace DataFixter.Services
                     }
                 }
 
-                _logger.LogInformation("数据验证完成: 总计 {TotalPoints} 个监测点, 生成 {ResultCount} 个验证结果", 
+                _logger.LogInformation("数据验证完成: 总计 {TotalPoints} 个监测点, 生成 {ResultCount} 个验证结果",
                     totalPoints, validationResults.Count);
             }
             catch (Exception ex)
@@ -103,18 +103,34 @@ namespace DataFixter.Services
 
                 // 验证累计变化量计算逻辑
                 var cumulativeValidationResults = ValidateCumulativeCalculation(point);
+                // 如果直接校验正确，都不需要校验其它了，直接当这行记录是不需要修改的
+                if (cumulativeValidationResults.Count == 0)
+                {
+                    results.Add(new ValidationResult(ValidationStatus.Valid, "数据验证", "累计变化量计算逻辑规则通过，不需要考虑其它处理了")
+                    {
+                        PointName = point.PointName,
+                        Severity = ValidationSeverity.Info
+                    });
+                    return results;
+                }
+
+                // 与对比数据进行交叉验证，得出哪一些数据可以修改
+                foreach (ValidationResult result in cumulativeValidationResults)
+                {
+                    // 查找对比数据中对应的点名
+                    var comparisonPointData = comparisonData
+                        .Where(pd => string.Equals(pd.PointName, point.PointName, StringComparison.OrdinalIgnoreCase) && pd.FormattedTime == result.FormattedTime)
+                        .ToList();
+                    // 如果找不到，表示可以修改
+                    if (comparisonPointData.Count == 0)
+                    {
+                        result.CanAdjustment = true;
+                    }
+                }
                 results.AddRange(cumulativeValidationResults);
 
-                // 与对比数据进行交叉验证
-                var comparisonValidationResults = ValidateAgainstComparisonData(point, comparisonData);
-                results.AddRange(comparisonValidationResults);
-
-                // 验证数据连续性
-                var continuityValidationResults = ValidateDataContinuity(point);
-                results.AddRange(continuityValidationResults);
-
                 // 如果没有验证失败，添加验证通过的结果
-                if (!results.Any(r => r.Status == ValidationStatus.Invalid))
+                if (results.All(r => r.Status != ValidationStatus.Invalid))
                 {
                     results.Add(new ValidationResult(ValidationStatus.Valid, "数据验证", "所有验证规则通过")
                     {
@@ -160,33 +176,45 @@ namespace DataFixter.Services
 
                     // 验证X方向
                     var xValidation = ValidateCumulativeDirection(
-                        point.PointName, 
-                        currentPeriod, 
-                        previousPeriod.CumulativeX, 
-                        currentPeriod.CurrentPeriodX, 
-                        currentPeriod.CumulativeX, 
+                        point.PointName,
+                        currentPeriod,
+                        previousPeriod.CumulativeX,
+                        currentPeriod.CurrentPeriodX,
+                        currentPeriod.CumulativeX,
                         DataDirection.X);
-                    if (xValidation != null) results.Add(xValidation);
+                    if (xValidation != null)
+                    {
+                        xValidation.FormattedTime = currentPeriod.FormattedTime;
+                        results.Add(xValidation);
+                    }
 
                     // 验证Y方向
                     var yValidation = ValidateCumulativeDirection(
-                        point.PointName, 
-                        currentPeriod, 
-                        previousPeriod.CumulativeY, 
-                        currentPeriod.CurrentPeriodY, 
-                        currentPeriod.CumulativeY, 
+                        point.PointName,
+                        currentPeriod,
+                        previousPeriod.CumulativeY,
+                        currentPeriod.CurrentPeriodY,
+                        currentPeriod.CumulativeY,
                         DataDirection.Y);
-                    if (yValidation != null) results.Add(yValidation);
+                    if (yValidation != null)
+                    {
+                        yValidation.FormattedTime = currentPeriod.FormattedTime;
+                        results.Add(yValidation);
+                    }
 
                     // 验证Z方向
                     var zValidation = ValidateCumulativeDirection(
-                        point.PointName, 
-                        currentPeriod, 
-                        previousPeriod.CumulativeZ, 
-                        currentPeriod.CurrentPeriodZ, 
-                        currentPeriod.CumulativeZ, 
+                        point.PointName,
+                        currentPeriod,
+                        previousPeriod.CumulativeZ,
+                        currentPeriod.CurrentPeriodZ,
+                        currentPeriod.CumulativeZ,
                         DataDirection.Z);
-                    if (zValidation != null) results.Add(zValidation);
+                    if (zValidation != null)
+                    {
+                        zValidation.FormattedTime = currentPeriod.FormattedTime;
+                        results.Add(zValidation);
+                    }
                 }
             }
             catch (Exception ex)
@@ -208,11 +236,11 @@ namespace DataFixter.Services
         /// <param name="direction">数据方向</param>
         /// <returns>验证结果</returns>
         private ValidationResult? ValidateCumulativeDirection(
-            string pointName, 
-            PeriodData currentPeriod, 
-            double previousCumulative, 
-            double currentPeriodValue, 
-            double currentCumulative, 
+            string pointName,
+            PeriodData currentPeriod,
+            double previousCumulative,
+            double currentPeriodValue,
+            double currentCumulative,
             DataDirection direction)
         {
             try
@@ -227,11 +255,11 @@ namespace DataFixter.Services
                 }
 
                 // 计算验证失败的程度
-                var severity = difference > _options.CriticalThreshold ? ValidationSeverity.Critical : 
-                              difference > _options.ErrorThreshold ? ValidationSeverity.Error : 
+                var severity = difference > _options.CriticalThreshold ? ValidationSeverity.Critical :
+                              difference > _options.ErrorThreshold ? ValidationSeverity.Error :
                               ValidationSeverity.Warning;
 
-                var result = new ValidationResult(ValidationStatus.Invalid, "累计变化量计算错误", 
+                var result = new ValidationResult(ValidationStatus.Invalid, "累计变化量计算错误",
                     $"{direction}方向累计变化量计算错误")
                 {
                     PointName = pointName,
@@ -289,10 +317,11 @@ namespace DataFixter.Services
 
                 if (comparisonPointData.Count == 0)
                 {
-                    // 对比数据中没有找到对应点名
-                    results.Add(new ValidationResult(ValidationStatus.NeedsAdjustment, "对比数据缺失", 
+                    // 对比数据中没有找到对应点名，表示数据是全新的，随便改
+                    results.Add(new ValidationResult(ValidationStatus.CanAdjustment, "对比数据缺失",
                         "对比数据中未找到对应点名")
                     {
+                        CanAdjustment = true,
                         PointName = point.PointName,
                         Severity = ValidationSeverity.Warning
                     });
@@ -300,15 +329,16 @@ namespace DataFixter.Services
                 }
 
                 // 验证对比数据的完整性
-                foreach (var comparisonDataItem in comparisonPointData)
-                {
-                    var comparisonValidation = ValidateComparisonDataIntegrity(point, comparisonDataItem);
-                    if (comparisonValidation != null) results.Add(comparisonValidation);
-                }
+                //foreach (var comparisonDataItem in comparisonPointData)
+                //{
+                //    var comparisonValidation = ValidateComparisonDataIntegrity(point, comparisonDataItem);
+                //    if (comparisonValidation != null) results.Add(comparisonValidation);
+                //}
 
                 // 交叉验证数据一致性
-                var crossValidationResults = ValidateDataConsistency(point, comparisonPointData);
-                results.AddRange(crossValidationResults);
+                // 不校验里程
+                //var crossValidationResults = ValidateDataConsistency(point, comparisonPointData);
+                //results.AddRange(crossValidationResults);
             }
             catch (Exception ex)
             {
@@ -316,6 +346,39 @@ namespace DataFixter.Services
             }
 
             return results;
+        }
+
+        /// <summary>
+        /// 看看原始数据中是否有值
+        /// </summary>
+        /// <param name="point"></param>
+        /// <param name="comparisonData"></param>
+        /// <returns></returns>
+        private ValidationResult? ValidateComparisonDataHaveVal(MonitoringPoint point, PeriodData comparisonData)
+        {
+            try
+            {
+                // 检查对比数据是否为空
+                if (comparisonData.CurrentPeriodX == 0)
+                {
+                    return new ValidationResult(ValidationStatus.CanAdjustment, "对比数据为空",
+                        "对比数据中所有方向的变化量都为空")
+                    {
+                        CanAdjustment = true,
+                        PointName = point.PointName,
+                        FileName = comparisonData.FileInfo?.OriginalFileName,
+                        RowNumber = comparisonData.RowNumber,
+                        Severity = ValidationSeverity.Warning
+                    };
+                }
+
+                return null;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "验证对比数据完整性时发生异常");
+                return null;
+            }
         }
 
         /// <summary>
@@ -333,9 +396,10 @@ namespace DataFixter.Services
                     Math.Abs(comparisonData.CurrentPeriodY) < _options.MinValueThreshold &&
                     Math.Abs(comparisonData.CurrentPeriodZ) < _options.MinValueThreshold)
                 {
-                    return new ValidationResult(ValidationStatus.NeedsAdjustment, "对比数据为空", 
+                    return new ValidationResult(ValidationStatus.CanAdjustment, "对比数据为空",
                         "对比数据中所有方向的变化量都为空")
                     {
+                        CanAdjustment = true,
                         PointName = point.PointName,
                         FileName = comparisonData.FileInfo?.OriginalFileName,
                         RowNumber = comparisonData.RowNumber,
@@ -366,22 +430,23 @@ namespace DataFixter.Services
             {
                 foreach (var comparisonData in comparisonDataList)
                 {
-                                    // 检查里程是否一致
-                if (Math.Abs(point.Mileage - comparisonData.Mileage) > _options.MileageTolerance)
-                {
-                    results.Add(new ValidationResult(ValidationStatus.NeedsAdjustment, "里程不一致", 
-                        $"监测点里程与对比数据不一致")
+                    // 检查里程是否一致
+                    if (Math.Abs(point.Mileage - comparisonData.Mileage) > _options.MileageTolerance)
                     {
-                        PointName = point.PointName,
-                        FileName = comparisonData.FileInfo?.OriginalFileName,
-                        RowNumber = comparisonData.RowNumber,
-                        Severity = ValidationSeverity.Warning
-                    });
-                }
+                        results.Add(new ValidationResult(ValidationStatus.NeedsAdjustment, "里程不一致",
+                            $"监测点里程与对比数据不一致")
+                        {
+                            PointName = point.PointName,
+                            FileName = comparisonData.FileInfo?.OriginalFileName,
+                            RowNumber = comparisonData.RowNumber,
+                            Severity = ValidationSeverity.Warning
+                        });
+                    }
 
                     // 检查数据量级是否合理
-                    var dataMagnitudeValidation = ValidateDataMagnitude(point, comparisonData);
-                    if (dataMagnitudeValidation != null) results.Add(dataMagnitudeValidation);
+                    // 不校验原始数据是否合理，因为不会修改原始数据
+                    //var dataMagnitudeValidation = ValidateDataMagnitude(point, comparisonData);
+                    //if (dataMagnitudeValidation != null) results.Add(dataMagnitudeValidation);
                 }
             }
             catch (Exception ex)
@@ -407,7 +472,7 @@ namespace DataFixter.Services
                     Math.Abs(comparisonData.CurrentPeriodY) > _options.MaxCurrentPeriodValue ||
                     Math.Abs(comparisonData.CurrentPeriodZ) > _options.MaxCurrentPeriodValue)
                 {
-                    return new ValidationResult(ValidationStatus.NeedsAdjustment, "数据量级异常", 
+                    return new ValidationResult(ValidationStatus.NeedsAdjustment, "数据量级异常",
                         "对比数据中本期变化量超出正常范围")
                     {
                         PointName = point.PointName,
@@ -447,14 +512,14 @@ namespace DataFixter.Services
                     var currentPeriod = sortedData[i];
 
                     // 检查时间间隔是否合理
-                    if (previousPeriod.FileInfo?.FullDateTime != null && 
+                    if (previousPeriod.FileInfo?.FullDateTime != null &&
                         currentPeriod.FileInfo?.FullDateTime != null)
                     {
                         var timeSpan = currentPeriod.FileInfo.FullDateTime - previousPeriod.FileInfo.FullDateTime;
-                        
+
                         if (timeSpan.TotalDays > _options.MaxTimeInterval)
                         {
-                            results.Add(new ValidationResult(ValidationStatus.NeedsAdjustment, "时间间隔异常", 
+                            results.Add(new ValidationResult(ValidationStatus.NeedsAdjustment, "时间间隔异常",
                                 $"相邻两期数据时间间隔过长: {timeSpan.TotalDays:F1}天")
                             {
                                 PointName = point.PointName,
@@ -494,7 +559,7 @@ namespace DataFixter.Services
                     Math.Abs(currentPeriod.CurrentPeriodY) > _options.MaxCurrentPeriodValue ||
                     Math.Abs(currentPeriod.CurrentPeriodZ) > _options.MaxCurrentPeriodValue)
                 {
-                    return new ValidationResult(ValidationStatus.NeedsAdjustment, "数据跳跃异常", 
+                    return new ValidationResult(ValidationStatus.NeedsAdjustment, "数据跳跃异常",
                         "本期变化量超出正常范围")
                     {
                         PointName = pointName,
@@ -678,7 +743,7 @@ namespace DataFixter.Services
             info += $"错误数: {ErrorCount}\n";
             info += $"警告数: {WarningCount}\n";
             info += $"信息数: {InfoCount}\n";
-            
+
             if (ValidationTypeStats.Count > 0)
             {
                 info += $"\n按验证类型统计:\n";

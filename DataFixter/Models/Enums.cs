@@ -44,7 +44,12 @@ namespace DataFixter.Models
         /// <summary>
         /// 需要修正
         /// </summary>
-        NeedsAdjustment
+        NeedsAdjustment,
+
+        /// <summary>
+        /// 可以修正
+        /// </summary>
+        CanAdjustment,
     }
 
     /// <summary>

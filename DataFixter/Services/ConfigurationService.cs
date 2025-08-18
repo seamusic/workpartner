@@ -25,7 +25,7 @@ namespace DataFixter.Services
             // 构建配置
             var configBuilder = new ConfigurationBuilder()
                 .SetBasePath(Directory.GetCurrentDirectory())
-                .AddJsonFile("Configuration/AppSettings.json", optional: true, reloadOnChange: true)
+                .AddJsonFile("appsettings.json", optional: true, reloadOnChange: true)
                 .AddEnvironmentVariables();
 
             _configuration = configBuilder.Build();

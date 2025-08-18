@@ -26,6 +26,12 @@ namespace DataFixter.Models
         public ValidationStatus Status { get; set; }
 
         /// <summary>
+        /// 是否可以修正
+        /// 如果原始数据中已经存在的，则尽可能不要修改原来的数据
+        /// </summary>
+        public bool CanAdjustment { get; set; }
+
+        /// <summary>
         /// 验证类型
         /// </summary>
         public string? ValidationType { get; set; }
@@ -94,6 +100,8 @@ namespace DataFixter.Models
         /// 修复方式
         /// </summary>
         public string? FixMethod { get; set; }
+
+        public string FormattedTime { get; set; }
 
         /// <summary>
         /// 构造函数

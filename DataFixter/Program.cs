@@ -19,6 +19,7 @@ namespace DataFixter
 
             try
             {
+                args = new[] { "E:\\workspace\\gmdi\\tools\\WorkPartner\\excel\\processed", "E:\\workspace\\gmdi\\tools\\WorkPartner\\excel" };
                 // 检查命令行参数
                 if (args.Length != 2)
                 {
@@ -146,8 +147,9 @@ namespace DataFixter
                 var validCount = validationResults.Count(v => v.Status == ValidationStatus.Valid);
                 var invalidCount = validationResults.Count(v => v.Status == ValidationStatus.Invalid);
                 var needsAdjustmentCount = validationResults.Count(v => v.Status == ValidationStatus.NeedsAdjustment);
+                var canAdjustmentCount = validationResults.Count(v => v.CanAdjustment);
 
-                Console.WriteLine($"  验证完成: 通过 {validCount} 条, 失败 {invalidCount} 条, 需要修正 {needsAdjustmentCount} 条");
+                Console.WriteLine($"  验证完成: 通过 {validCount} 条, 失败 {invalidCount} 条, 需要修正 {needsAdjustmentCount} 条, 可以修正 {canAdjustmentCount} 条");
 
                 // 步骤5: 数据修正
                 Console.WriteLine("步骤5: 数据修正...");
@@ -244,7 +246,7 @@ namespace DataFixter
                         CumulativeX = 0.0,
                         CumulativeY = 0.0,
                         CumulativeZ = 0.0,
-                        FileInfo = new DataFixter.Models.FileInfo("test_2025.1.1-00测试.xls", 1024, DateTime.Now.AddDays(-2))
+                        FileInfo = new DataFixter.Models.ExcelFileInfo("test_2025.1.1-00测试.xls", 1024, DateTime.Now.AddDays(-2))
                     },
                     // 第1期：本期变化量和累计值都有问题，需要双重修正
                     new PeriodData
@@ -256,7 +258,7 @@ namespace DataFixter
                         CumulativeX = 1.2,   // 错误：应该是 0.0 + 2.5 = 2.5
                         CumulativeY = 0.8,   // 错误：应该是 0.0 + 1.8 = 1.8
                         CumulativeZ = 0.5,   // 错误：应该是 0.0 + 1.2 = 1.2
-                        FileInfo = new DataFixter.Models.FileInfo("test_2025.1.2-00测试.xls", 1024, DateTime.Now.AddDays(-1))
+                        FileInfo = new DataFixter.Models.ExcelFileInfo("test_2025.1.2-00测试.xls", 1024, DateTime.Now.AddDays(-1))
                     },
                     // 第2期：本期变化量和累计值都有问题，需要双重修正
                     new PeriodData
@@ -268,18 +270,18 @@ namespace DataFixter
                         CumulativeX = 2.1,   // 错误：应该是 2.5 + 1.8 = 4.3
                         CumulativeY = 1.4,   // 错误：应该是 1.8 + 1.5 = 3.3
                         CumulativeZ = 0.9,   // 错误：应该是 1.2 + 1.1 = 2.3
-                        FileInfo = new DataFixter.Models.FileInfo("test_2025.1.3-00测试.xls", 1024, DateTime.Now)
+                        FileInfo = new DataFixter.Models.ExcelFileInfo("test_2025.1.3-00测试.xls", 1024, DateTime.Now)
                     }
                 }
             };
             
             var testPoints = new List<MonitoringPoint> { testPoint };
 
-            // 创建配置选项 - 使用配置文件中的值，而不是硬编码的严格值
+            // 创建配置选项 - 使用更严格的值来测试修正逻辑
             var options = new Services.CorrectionOptions
             {
                 CumulativeTolerance = 0.1,  // 使用配置文件中的值
-                MaxCurrentPeriodValue = 5.0, // 使用配置文件中的值
+                MaxCurrentPeriodValue = 1.0, // 使用更严格的值，使测试数据能够触发修正
                 MaxCumulativeValue = 10.0    // 使用配置文件中的值
             };
 
@@ -418,7 +420,7 @@ namespace DataFixter
             
             var period1 = new PeriodData
             {
-                FileInfo = new Models.FileInfo("test1.xls", 1024, DateTime.Now),
+                FileInfo = new Models.ExcelFileInfo("test1.xls", 1024, DateTime.Now),
                 RowNumber = 5,
                 PointName = "测试点1",
                 Mileage = 100.50,
@@ -435,7 +437,7 @@ namespace DataFixter
 
             var period2 = new PeriodData
             {
-                FileInfo = new Models.FileInfo("test2.xls", 1024, DateTime.Now.AddDays(1)),
+                FileInfo = new Models.ExcelFileInfo("test2.xls", 1024, DateTime.Now.AddDays(1)),
                 RowNumber = 5,
                 PointName = "测试点1",
                 Mileage = 100.50,
@@ -459,7 +461,7 @@ namespace DataFixter
             
             var period3 = new PeriodData
             {
-                FileInfo = new Models.FileInfo("test1.xls", 1024, DateTime.Now),
+                FileInfo = new Models.ExcelFileInfo("test1.xls", 1024, DateTime.Now),
                 RowNumber = 6,
                 PointName = "测试点2",
                 Mileage = 200.75,
@@ -549,7 +551,7 @@ namespace DataFixter
             // 对比数据1
             data.Add(new PeriodData
             {
-                FileInfo = new Models.FileInfo("comparison1.xls", 1024, DateTime.Now),
+                FileInfo = new Models.ExcelFileInfo("comparison1.xls", 1024, DateTime.Now),
                 RowNumber = 5,
                 PointName = "测试点1",
                 Mileage = 100.50,
@@ -567,7 +569,7 @@ namespace DataFixter
             // 对比数据2
             data.Add(new PeriodData
             {
-                FileInfo = new Models.FileInfo("comparison2.xls", 1024, DateTime.Now),
+                FileInfo = new Models.ExcelFileInfo("comparison2.xls", 1024, DateTime.Now),
                 RowNumber = 6,
                 PointName = "测试点2",
                 Mileage = 200.75,
@@ -585,7 +587,7 @@ namespace DataFixter
             // 对比数据3（空数据，用于测试对比数据为空的情况）
             data.Add(new PeriodData
             {
-                FileInfo = new Models.FileInfo("comparison3.xls", 1024, DateTime.Now),
+                FileInfo = new Models.ExcelFileInfo("comparison3.xls", 1024, DateTime.Now),
                 RowNumber = 7,
                 PointName = "测试点3",
                 Mileage = 300.00,

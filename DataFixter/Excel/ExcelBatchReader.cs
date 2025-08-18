@@ -177,32 +177,35 @@ namespace DataFixter.Excel
         /// <param name="rowNumber">行号（从1开始）</param>
         /// <param name="fileInfo">文件信息</param>
         /// <returns>行数据</returns>
-        private ExcelDataRow? ExtractRowData(IRow row, int rowNumber, Models.FileInfo fileInfo)
+        private ExcelDataRow? ExtractRowData(IRow row, int rowNumber, Models.ExcelFileInfo fileInfo)
         {
             try
             {
                 // 检查点名列（第1列，索引为0）
-                var pointNameCell = row.GetCell(0);
+                var pointNameCell = row.GetCell(1);
                 if (pointNameCell == null || string.IsNullOrWhiteSpace(GetCellValue(pointNameCell)))
                 {
                     return null; // 跳过空行
                 }
 
+                double orderNumber = GetNumericCellValue(row.GetCell(1));
+
                 var dataRow = new ExcelDataRow
                 {
                     RowNumber = rowNumber,
                     FileInfo = fileInfo,
+                    OrderNumber = (int)orderNumber, //应该是第1列，序号
                     PointName = GetCellValue(pointNameCell)?.Trim(),
-                    Mileage = GetNumericCellValue(row.GetCell(1)), // 里程列
-                    CurrentPeriodX = GetNumericCellValue(row.GetCell(2)), // 本期变化量X
-                    CurrentPeriodY = GetNumericCellValue(row.GetCell(3)), // 本期变化量Y
-                    CurrentPeriodZ = GetNumericCellValue(row.GetCell(4)), // 本期变化量Z
-                    CumulativeX = GetNumericCellValue(row.GetCell(5)), // 累计变化量X
-                    CumulativeY = GetNumericCellValue(row.GetCell(6)), // 累计变化量Y
-                    CumulativeZ = GetNumericCellValue(row.GetCell(7)), // 累计变化量Z
-                    DailyX = GetNumericCellValue(row.GetCell(8)), // 日变化量X
-                    DailyY = GetNumericCellValue(row.GetCell(9)), // 日变化量Y
-                    DailyZ = GetNumericCellValue(row.GetCell(10)) // 日变化量Z
+                    Mileage = GetNumericCellValue(row.GetCell(2)), // 里程列
+                    CurrentPeriodX = GetNumericCellValue(row.GetCell(3)), // 本期变化量X
+                    CurrentPeriodY = GetNumericCellValue(row.GetCell(4)), // 本期变化量Y
+                    CurrentPeriodZ = GetNumericCellValue(row.GetCell(5)), // 本期变化量Z
+                    CumulativeX = GetNumericCellValue(row.GetCell(6)), // 累计变化量X
+                    CumulativeY = GetNumericCellValue(row.GetCell(7)), // 累计变化量Y
+                    CumulativeZ = GetNumericCellValue(row.GetCell(8)), // 累计变化量Z
+                    DailyX = GetNumericCellValue(row.GetCell(9)), // 日变化量X
+                    DailyY = GetNumericCellValue(row.GetCell(10)), // 日变化量Y
+                    DailyZ = GetNumericCellValue(row.GetCell(11)) // 日变化量Z
                 };
 
                 // 验证点名不为空
@@ -294,10 +297,10 @@ namespace DataFixter.Excel
         /// </summary>
         /// <param name="filePath">文件路径</param>
         /// <returns>文件信息</returns>
-        private Models.FileInfo GetFileInfo(string filePath)
+        private Models.ExcelFileInfo GetFileInfo(string filePath)
         {
             var systemFileInfo = new System.IO.FileInfo(filePath);
-            return new Models.FileInfo(filePath, systemFileInfo.Length, systemFileInfo.LastWriteTime);
+            return new Models.ExcelFileInfo(filePath, systemFileInfo.Length, systemFileInfo.LastWriteTime);
         }
     }
 
@@ -348,9 +351,14 @@ namespace DataFixter.Excel
         public int RowNumber { get; set; }
 
         /// <summary>
+        /// 序号
+        /// </summary>
+        public int OrderNumber { get; set; }
+
+        /// <summary>
         /// 文件信息
         /// </summary>
-        public Models.FileInfo FileInfo { get; set; } = null!;
+        public Models.ExcelFileInfo FileInfo { get; set; } = null!;
 
         /// <summary>
         /// 点名
