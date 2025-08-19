@@ -64,7 +64,7 @@ namespace DataFixter
             var testPoints = new List<MonitoringPoint> { testPoint };
 
             // 创建配置选项 - 使用更严格的值来测试修正逻辑
-            var options = new DataFixter.Services.CorrectionOptions
+            var options = new DataFixter.Models.CorrectionOptions
             {
                 CumulativeTolerance = 0.1,  // 使用配置文件中的值
                 MaxCurrentPeriodValue = 1.0, // 使用更严格的值，使测试数据能够触发修正

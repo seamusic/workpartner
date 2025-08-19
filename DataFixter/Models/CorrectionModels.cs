@@ -28,6 +28,12 @@ namespace DataFixter.Models
         /// 是否启用最小化修改策略
         /// </summary>
         public bool EnableMinimalModification { get; set; } = true;
+
+        /// <summary>
+        /// 随机变化量范围（正负值）
+        /// 用于生成每期数据的随机波动，范围：-RandomChangeRange 到 +RandomChangeRange
+        /// </summary>
+        public double RandomChangeRange { get; set; } = 0.3;
     }
 
     /// <summary>

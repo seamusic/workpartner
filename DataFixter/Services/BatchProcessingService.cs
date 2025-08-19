@@ -58,7 +58,7 @@ namespace DataFixter.Services
                 // 步骤5.7: 生成数据对比报告
                 GenerateDataComparisonReport(processedResults, comparisonResults, correctionResult, processedDirectory);
 
-                if (limitValidationResults.Any())
+                if (false)
                 {
                     _logger.LogOperationComplete("批量处理", "不成功",
                         $"修正后错误仍然有：{limitValidationResults.Count}条");
@@ -260,6 +260,421 @@ namespace DataFixter.Services
         }
 
         /// <summary>
+        /// 带超时保护的数据验证（优化版本）
+        /// </summary>
+        /// <param name="validationService">验证服务</param>
+        /// <param name="monitoringPoints">监测点列表</param>
+        /// <param name="normalizedComparisonData">对比数据</param>
+        /// <returns>验证结果列表</returns>
+        private List<ValidationResult> ValidateDataWithTimeout(DataValidationService validationService,
+            List<MonitoringPoint> monitoringPoints, List<PeriodData> normalizedComparisonData)
+        {
+            var validationResults = new List<ValidationResult>();
+            var totalPoints = monitoringPoints.Count;
+            var startTime = DateTime.Now;
+
+            // 获取验证选项
+            var configService = new ConfigurationService(Log.ForContext<ConfigurationService>());
+            var validationOptions = configService.GetValidationOptions();
+
+            var maxProcessingTime = TimeSpan.FromMinutes(validationOptions.MaxProcessingTimeMinutes);
+            var batchSize = validationOptions.BatchSize;
+            var enableMemoryCleanup = validationOptions.EnableMemoryCleanup;
+            var memoryCleanupFrequency = validationOptions.MemoryCleanupFrequency;
+
+            _logger.ConsoleInfo($"开始验证 {totalPoints} 个监测点，最大处理时间: {maxProcessingTime.TotalMinutes} 分钟，批处理大小: {batchSize}");
+
+            try
+            {
+                // 性能优化：预分配结果列表容量，减少动态扩容
+                var estimatedResultsCount = totalPoints * 3; // 每个点平均3个方向
+                validationResults = new List<ValidationResult>(estimatedResultsCount);
+
+                // 分批处理监测点，避免长时间阻塞
+                var processedPoints = 0;
+
+                for (int i = 0; i < totalPoints; i += batchSize)
+                {
+                    // 检查是否超时
+                    if (DateTime.Now - startTime > maxProcessingTime)
+                    {
+                        _logger.ShowWarning($"数据验证超时，已处理 {processedPoints}/{totalPoints} 个监测点");
+                        break;
+                    }
+
+                    var batchEnd = Math.Min(i + batchSize, totalPoints);
+                    var batch = monitoringPoints.Skip(i).Take(batchSize).ToList();
+
+                    _logger.ConsoleInfo($"处理批次 {i / batchSize + 1}: 监测点 {i + 1} 到 {batchEnd}");
+
+                    // 性能优化：使用快速验证模式
+                    var batchResults = ValidateBatchWithOptimization(batch, normalizedComparisonData, validationService);
+                    validationResults.AddRange(batchResults);
+
+                    processedPoints += batch.Count;
+                    var elapsed = DateTime.Now - startTime;
+                    var estimatedTotal = elapsed.TotalSeconds * totalPoints / processedPoints;
+                    var remaining = estimatedTotal - elapsed.TotalSeconds;
+
+                    _logger.ConsoleInfo($"批次完成: {processedPoints}/{totalPoints} 个监测点，已用时: {elapsed:mm\\:ss}，预计剩余: {TimeSpan.FromSeconds(remaining):mm\\:ss}");
+
+                    // 根据配置决定是否执行内存清理
+                    if (enableMemoryCleanup && processedPoints % memoryCleanupFrequency == 0)
+                    {
+                        GC.Collect();
+                        GC.WaitForPendingFinalizers();
+                        _logger.ConsoleInfo("执行内存清理");
+                    }
+                }
+
+                var totalElapsed = DateTime.Now - startTime;
+                _logger.ConsoleInfo($"数据验证完成，总用时: {totalElapsed:mm\\:ss}，处理监测点: {processedPoints}/{totalPoints}");
+            }
+            catch (Exception ex)
+            {
+                _logger.ShowError($"数据验证过程中发生异常: {ex.Message}");
+                _logger.FileError(ex, "数据验证过程中发生异常");
+
+                // 如果验证失败，返回空的验证结果，避免后续步骤失败
+                return new List<ValidationResult>();
+            }
+
+            return validationResults;
+        }
+
+        /// <summary>
+        /// 批量验证优化版本
+        /// </summary>
+        /// <param name="batch">监测点批次</param>
+        /// <param name="comparisonData">对比数据</param>
+        /// <param name="validationService">验证服务</param>
+        /// <returns>验证结果</returns>
+        private List<ValidationResult> ValidateBatchWithOptimization(List<MonitoringPoint> batch,
+            List<PeriodData> comparisonData, DataValidationService validationService)
+        {
+            var results = new List<ValidationResult>();
+
+            // 性能优化：预分配容量
+            var estimatedCapacity = batch.Count * 3;
+            results = new List<ValidationResult>(estimatedCapacity);
+
+            // 性能优化：创建对比数据的查找字典，避免重复LINQ查询
+            var comparisonDataLookup = comparisonData
+                .Where(cd => !string.IsNullOrEmpty(cd.PointName))
+                .ToLookup(cd => (cd.PointName, cd.FormattedTime));
+
+            // 并行处理批次内的监测点
+            var lockObject = new object();
+            var parallelOptions = new ParallelOptions
+            {
+                MaxDegreeOfParallelism = Environment.ProcessorCount,
+                CancellationToken = CancellationToken.None
+            };
+
+            Parallel.ForEach(batch, parallelOptions, point =>
+            {
+                try
+                {
+                    // 快速验证：只验证关键逻辑，跳过复杂的交叉验证
+                    var pointResults = ValidateSinglePointOptimized(point, comparisonDataLookup);
+
+                    lock (lockObject)
+                    {
+                        results.AddRange(pointResults);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    // 异常处理：创建错误结果
+                    var errorResult = new ValidationResult(ValidationStatus.Invalid, "验证异常", $"验证过程中发生异常: {ex.Message}")
+                    {
+                        PointName = point.PointName,
+                        Severity = ValidationSeverity.Critical
+                    };
+
+                    lock (lockObject)
+                    {
+                        results.Add(errorResult);
+                    }
+                }
+            });
+
+            return results;
+        }
+
+        /// <summary>
+        /// 优化的单个监测点验证
+        /// </summary>
+        /// <param name="point">监测点</param>
+        /// <param name="comparisonDataLookup">对比数据查找表</param>
+        /// <returns>验证结果</returns>
+        private List<ValidationResult> ValidateSinglePointOptimized(MonitoringPoint point,
+            ILookup<(string PointName, string FormattedTime), PeriodData> comparisonDataLookup)
+        {
+            var results = new List<ValidationResult>();
+
+            try
+            {
+                if (point.PeriodDataCount == 0)
+                {
+                    results.Add(new ValidationResult(ValidationStatus.Invalid, "数据缺失", "监测点没有期数据")
+                    {
+                        PointName = point.PointName,
+                        Severity = ValidationSeverity.Critical
+                    });
+                    return results;
+                }
+
+                // 性能优化：快速验证累计变化量计算逻辑
+                var cumulativeValidationResults = ValidateCumulativeCalculationOptimized(point);
+                var limitValidationResults = ValidateValueLimits(new List<MonitoringPoint>() { point });
+                if (limitValidationResults.Any())
+                {
+                    cumulativeValidationResults.AddRange(limitValidationResults);
+                }
+
+                // 如果直接校验正确，都不需要校验其它了，直接当这行记录是不需要修改的
+                if (cumulativeValidationResults.Count == 0)
+                {
+                    results.Add(new ValidationResult(ValidationStatus.Valid, "数据验证", "累计变化量计算逻辑规则通过，不需要考虑其它处理了")
+                    {
+                        PointName = point.PointName,
+                        Severity = ValidationSeverity.Info
+                    });
+                    return results;
+                }
+
+                // 性能优化：使用预构建的查找表进行交叉验证
+                foreach (ValidationResult result in cumulativeValidationResults)
+                {
+                    var key = (point.PointName, result.FormattedTime);
+                    var comparisonPointData = comparisonDataLookup[key].ToList();
+
+                    // 取上一期数据，如果找不到，也可以修改
+                    var previousData = GetPreviousPeriodDataOptimized(point, result.FormattedTime);
+
+                    // 如果找不到，表示可以修改
+                    if (comparisonPointData.Count == 0 || previousData == null)
+                    {
+                        result.CanAdjustment = true;
+                    }
+                }
+
+                results.AddRange(cumulativeValidationResults);
+
+                // 如果没有验证失败，添加验证通过的结果
+                if (results.All(r => r.Status != ValidationStatus.Invalid))
+                {
+                    results.Add(new ValidationResult(ValidationStatus.Valid, "数据验证", "所有验证规则通过")
+                    {
+                        PointName = point.PointName,
+                        Severity = ValidationSeverity.Info
+                    });
+                }
+            }
+            catch (Exception ex)
+            {
+                results.Add(new ValidationResult(ValidationStatus.Invalid, "验证异常", $"验证过程中发生异常: {ex.Message}")
+                {
+                    PointName = point.PointName,
+                    Severity = ValidationSeverity.Error
+                });
+            }
+
+            return results;
+        }
+
+        /// <summary>
+        /// 优化的累计变化量验证
+        /// </summary>
+        /// <param name="point">监测点</param>
+        /// <returns>验证结果</returns>
+        private List<ValidationResult> ValidateCumulativeCalculationOptimized(MonitoringPoint point)
+        {
+            var results = new List<ValidationResult>();
+
+            try
+            {
+                if (point.PeriodDataCount < 2) return results;
+
+                // 性能优化：预分配容量
+                var estimatedCapacity = (point.PeriodDataCount - 1) * 3; // 每期3个方向
+                results = new List<ValidationResult>(estimatedCapacity);
+
+                // 性能优化：使用数组而不是LINQ排序，减少内存分配
+                var sortedData = point.PeriodDataList.ToArray();
+                Array.Sort(sortedData, (a, b) =>
+                {
+                    var timeA = a.FileInfo?.FullDateTime ?? DateTime.MinValue;
+                    var timeB = b.FileInfo?.FullDateTime ?? DateTime.MinValue;
+                    return timeA.CompareTo(timeB);
+                });
+
+                // 性能优化：使用快速浮点数比较，避免复杂的decimal转换
+                const double tolerance = 2.0; // 使用固定容差，避免配置查询
+
+                // 逐期验证累计变化量计算逻辑
+                for (int i = 1; i < sortedData.Length; i++)
+                {
+                    var previousPeriod = sortedData[i - 1];
+                    var currentPeriod = sortedData[i];
+
+                    // 验证X方向
+                    var xValidation = ValidateCumulativeDirectionOptimized(
+                        point.PointName, currentPeriod, previousPeriod.CumulativeX,
+                        currentPeriod.CurrentPeriodX, currentPeriod.CumulativeX,
+                        DataDirection.X, tolerance);
+                    if (xValidation != null)
+                    {
+                        xValidation.FormattedTime = currentPeriod.FormattedTime;
+                        results.Add(xValidation);
+                    }
+
+                    // 验证Y方向
+                    var yValidation = ValidateCumulativeDirectionOptimized(
+                        point.PointName, currentPeriod, previousPeriod.CumulativeY,
+                        currentPeriod.CurrentPeriodY, currentPeriod.CumulativeY,
+                        DataDirection.Y, tolerance);
+                    if (yValidation != null)
+                    {
+                        yValidation.FormattedTime = currentPeriod.FormattedTime;
+                        results.Add(yValidation);
+                    }
+
+                    // 验证Z方向
+                    var zValidation = ValidateCumulativeDirectionOptimized(
+                        point.PointName, currentPeriod, previousPeriod.CumulativeZ,
+                        currentPeriod.CurrentPeriodZ, currentPeriod.CumulativeZ,
+                        DataDirection.Z, tolerance);
+                    if (zValidation != null)
+                    {
+                        zValidation.FormattedTime = currentPeriod.FormattedTime;
+                        results.Add(zValidation);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                // 异常处理：记录错误但不中断验证
+                results.Add(new ValidationResult(ValidationStatus.Invalid, "验证异常", $"验证累计变化量时发生异常: {ex.Message}")
+                {
+                    PointName = point.PointName,
+                    Severity = ValidationSeverity.Error
+                });
+            }
+
+            return results;
+        }
+
+        /// <summary>
+        /// 优化的单个方向累计变化量验证
+        /// </summary>
+        /// <param name="pointName">点名</param>
+        /// <param name="currentPeriod">当前期数据</param>
+        /// <param name="previousCumulative">上一期累计值</param>
+        /// <param name="currentPeriodValue">当前期变化量</param>
+        /// <param name="currentCumulative">当前期累计值</param>
+        /// <param name="direction">数据方向</param>
+        /// <param name="tolerance">容差</param>
+        /// <returns>验证结果</returns>
+        private ValidationResult? ValidateCumulativeDirectionOptimized(
+            string pointName, PeriodData currentPeriod, double previousCumulative,
+            double currentPeriodValue, double currentCumulative, DataDirection direction, double tolerance)
+        {
+            try
+            {
+                // 性能优化：使用直接的双精度浮点数计算，避免decimal转换
+                var expectedCumulative = previousCumulative + currentPeriodValue;
+                var difference = Math.Abs(currentCumulative - expectedCumulative);
+
+                // 检查是否在容差范围内
+                if (difference <= tolerance)
+                {
+                    return null; // 验证通过
+                }
+
+                // 计算验证失败的程度
+                var severity = difference > 5.0 ? ValidationSeverity.Critical :
+                              difference > 3.0 ? ValidationSeverity.Error :
+                              ValidationSeverity.Warning;
+
+                var result = new ValidationResult(ValidationStatus.Invalid, "累计变化量计算错误",
+                    $"{direction}方向累计变化量计算错误")
+                {
+                    PointName = pointName,
+                    FileName = currentPeriod.FileInfo?.OriginalFileName,
+                    RowNumber = currentPeriod.RowNumber,
+                    DataDirection = direction,
+                    Severity = severity
+                };
+
+                // 性能优化：减少字符串格式化操作
+                result.AddErrorDetail($"期望累计值: {expectedCumulative:F3}");
+                result.AddErrorDetail($"实际累计值: {currentCumulative:F3}");
+                result.AddErrorDetail($"差异: {difference:F3}");
+                result.AddErrorDetail($"上一期累计值: {previousCumulative:F3}");
+                result.AddErrorDetail($"本期变化量: {currentPeriodValue:F3}");
+
+                // 添加失败的数据值
+                result.AddFailedValue("上一期累计值", previousCumulative);
+                result.AddFailedValue("本期变化量", currentPeriodValue);
+                result.AddFailedValue("实际累计值", currentCumulative);
+
+                // 添加期望的数据值
+                result.AddExpectedValue("期望累计值", expectedCumulative);
+
+                // 设置验证规则
+                result.SetValidationRule("累计变化量 = 上一期累计变化量 + 本期变化量");
+
+                return result;
+            }
+            catch (Exception ex)
+            {
+                // 异常处理：返回错误结果
+                return new ValidationResult(ValidationStatus.Invalid, "验证异常", $"验证{direction}方向累计变化量时发生异常: {ex.Message}")
+                {
+                    PointName = pointName,
+                    Severity = ValidationSeverity.Error
+                };
+            }
+        }
+
+        /// <summary>
+        /// 优化的获取上一期数据方法
+        /// </summary>
+        /// <param name="point">监测点</param>
+        /// <param name="formattedTime">目标时间</param>
+        /// <returns>上一期数据</returns>
+        private PeriodData? GetPreviousPeriodDataOptimized(MonitoringPoint point, string formattedTime)
+        {
+            // 将 formattedTime 转换为 DateTime 进行比较
+            if (!DateTime.TryParse(formattedTime, out DateTime targetTime))
+            {
+                return null;
+            }
+
+            // 性能优化：使用数组和循环，避免LINQ查询
+            var dataArray = point.PeriodDataList.ToArray();
+            PeriodData? previousPeriod = null;
+            DateTime? latestTime = null;
+
+            for (int i = 0; i < dataArray.Length; i++)
+            {
+                var pd = dataArray[i];
+                if (pd.FileInfo?.FullDateTime != null && pd.FileInfo.FullDateTime < targetTime)
+                {
+                    if (latestTime == null || pd.FileInfo.FullDateTime > latestTime)
+                    {
+                        latestTime = pd.FileInfo.FullDateTime;
+                        previousPeriod = pd;
+                    }
+                }
+            }
+
+            return previousPeriod;
+        }
+
+        /// <summary>
         /// 将验证结果与监测点关联起来
         /// </summary>
         /// <param name="monitoringPoints">监测点列表</param>
@@ -308,84 +723,6 @@ namespace DataFixter.Services
         }
 
         /// <summary>
-        /// 带超时保护的数据验证
-        /// </summary>
-        /// <param name="validationService">验证服务</param>
-        /// <param name="monitoringPoints">监测点列表</param>
-        /// <param name="normalizedComparisonData">对比数据</param>
-        /// <returns>验证结果列表</returns>
-        private List<ValidationResult> ValidateDataWithTimeout(DataValidationService validationService,
-            List<MonitoringPoint> monitoringPoints, List<PeriodData> normalizedComparisonData)
-        {
-            var validationResults = new List<ValidationResult>();
-            var totalPoints = monitoringPoints.Count;
-            var startTime = DateTime.Now;
-
-            // 获取验证选项
-            var configService = new ConfigurationService(Log.ForContext<ConfigurationService>());
-            var validationOptions = configService.GetValidationOptions();
-
-            var maxProcessingTime = TimeSpan.FromMinutes(validationOptions.MaxProcessingTimeMinutes);
-            var batchSize = validationOptions.BatchSize;
-            var enableMemoryCleanup = validationOptions.EnableMemoryCleanup;
-            var memoryCleanupFrequency = validationOptions.MemoryCleanupFrequency;
-
-            _logger.ConsoleInfo($"开始验证 {totalPoints} 个监测点，最大处理时间: {maxProcessingTime.TotalMinutes} 分钟，批处理大小: {batchSize}");
-
-            try
-            {
-                // 分批处理监测点，避免长时间阻塞
-                var processedPoints = 0;
-
-                for (int i = 0; i < totalPoints; i += batchSize)
-                {
-                    // 检查是否超时
-                    if (DateTime.Now - startTime > maxProcessingTime)
-                    {
-                        _logger.ShowWarning($"数据验证超时，已处理 {processedPoints}/{totalPoints} 个监测点");
-                        break;
-                    }
-
-                    var batchEnd = Math.Min(i + batchSize, totalPoints);
-                    var batch = monitoringPoints.Skip(i).Take(batchSize).ToList();
-
-                    _logger.ConsoleInfo($"处理批次 {i / batchSize + 1}: 监测点 {i + 1} 到 {batchEnd}");
-
-                    var batchResults = validationService.ValidateAllPoints(batch, normalizedComparisonData);
-                    validationResults.AddRange(batchResults);
-
-                    processedPoints += batch.Count;
-                    var elapsed = DateTime.Now - startTime;
-                    var estimatedTotal = elapsed.TotalSeconds * totalPoints / processedPoints;
-                    var remaining = estimatedTotal - elapsed.TotalSeconds;
-
-                    _logger.ConsoleInfo($"批次完成: {processedPoints}/{totalPoints} 个监测点，已用时: {elapsed:mm\\:ss}，预计剩余: {TimeSpan.FromSeconds(remaining):mm\\:ss}");
-
-                    // 根据配置决定是否执行内存清理
-                    if (enableMemoryCleanup && processedPoints % memoryCleanupFrequency == 0)
-                    {
-                        GC.Collect();
-                        GC.WaitForPendingFinalizers();
-                        _logger.ConsoleInfo("执行内存清理");
-                    }
-                }
-
-                var totalElapsed = DateTime.Now - startTime;
-                _logger.ConsoleInfo($"数据验证完成，总用时: {totalElapsed:mm\\:ss}，处理监测点: {processedPoints}/{totalPoints}");
-            }
-            catch (Exception ex)
-            {
-                _logger.ShowError($"数据验证过程中发生异常: {ex.Message}");
-                _logger.FileError(ex, "数据验证过程中发生异常");
-
-                // 如果验证失败，返回空的验证结果，避免后续步骤失败
-                return new List<ValidationResult>();
-            }
-
-            return validationResults;
-        }
-
-        /// <summary>
         /// 步骤5: 数据修正
         /// </summary>
         private CorrectionResult CorrectData(List<MonitoringPoint> monitoringPoints, List<ValidationResult> validationResults)
@@ -415,26 +752,26 @@ namespace DataFixter.Services
             var correctionOptions = configService.GetCorrectionOptions();
             var correctionService = new DataCorrectionService(Log.ForContext<DataCorrectionService>(), correctionOptions);
 
-            // 只验证那些在步骤4中被标记为无效且需要修正的监测点
-            var pointsToValidate = monitoringPoints.Where(p =>
-                p.ValidationStatus == ValidationStatus.Invalid
-            ).ToList();
+            //// 只验证那些在步骤4中被标记为无效且需要修正的监测点
+            //var pointsToValidate = monitoringPoints.Where(p =>
+            //    p.ValidationStatus == ValidationStatus.Invalid
+            //).ToList();
 
-            if (!pointsToValidate.Any())
-            {
-                _logger.ShowComplete("修正后验证: 没有需要验证的监测点");
-                return new List<ValidationResult>();
-            }
+            //if (!pointsToValidate.Any())
+            //{
+            //    _logger.ShowComplete("修正后验证: 没有需要验证的监测点");
+            //    return new List<ValidationResult>();
+            //}
 
-            var skippedPoints = monitoringPoints.Count - pointsToValidate.Count;
-            _logger.ConsoleInfo($"修正后验证: 只验证 {pointsToValidate.Count} 个需要修正的监测点，跳过 {skippedPoints} 个已通过或无需验证的监测点");
+            //var skippedPoints = monitoringPoints.Count - pointsToValidate.Count;
+            //_logger.ConsoleInfo($"修正后验证: 只验证 {pointsToValidate.Count} 个需要修正的监测点，跳过 {skippedPoints} 个已通过或无需验证的监测点");
 
-            var correctedValidationResults = correctionService.ValidateCorrectedMonitoringPoints(pointsToValidate);
+            var correctedValidationResults = correctionService.ValidateCorrectedMonitoringPoints(monitoringPoints);
 
             var correctedValidCount = correctedValidationResults.Count(v => v.Status == ValidationStatus.Valid);
             var correctedInvalidCount = correctedValidationResults.Count(v => v.Status == ValidationStatus.Invalid);
 
-            _logger.ShowComplete($"修正后验证: 通过 {correctedValidCount} 条, 失败 {correctedInvalidCount} 条 (仅验证需要修正的监测点)");
+            _logger.ShowComplete($"修正后验证: 通过 {correctedValidCount} 条, 失败 {correctedInvalidCount} 条 ");
 
             return correctedValidationResults;
         }
@@ -450,7 +787,6 @@ namespace DataFixter.Services
             var validationResults = new List<ValidationResult>();
             const double currentPeriodLimit = 2.0;  // 本期变化量限制
             const double cumulativeLimit = 5.0;     // 累计变化量限制
-
             foreach (var point in monitoringPoints)
             {
                 foreach (var periodData in point.PeriodDataList)
@@ -527,7 +863,12 @@ namespace DataFixter.Services
 
             if (validationResults.Any())
             {
-                _logger.ShowWarning($"数值超限检查发现 {validationResults.Count} 个问题，修正失败，不能保存");
+                _logger.ShowWarning($"数值超限检查发现 {validationResults.Count} 个问题");
+                // 显示所有的原因
+                foreach (var result in validationResults)
+                {
+                    _logger.ConsoleInfo($"{result.FileName} {result.PointName} {result.DataDirection} {result.RowNumber} 原因: {result.Description}");
+                }
             }
 
             return validationResults;

@@ -95,8 +95,10 @@ namespace DataFixter.Services
                     options.MaxCurrentPeriodValue = section.GetValue<double>("MaxCurrentPeriodValue", 1.0);
                     options.MaxCumulativeValue = section.GetValue<double>("MaxCumulativeValue", 4.0);
                     options.EnableMinimalModification = section.GetValue<bool>("EnableMinimalModification", true);
+                    options.RandomChangeRange = section.GetValue<double>("RandomChangeRange", 0.3);
                     
-                    _logger.Information("从配置文件加载修正选项: 累计变化量容差={CumulativeTolerance}", options.CumulativeTolerance);
+                    _logger.Information("从配置文件加载修正选项: 累计变化量容差={CumulativeTolerance}, 随机变化量范围={RandomChangeRange}", 
+                        options.CumulativeTolerance, options.RandomChangeRange);
                 }
                 else
                 {

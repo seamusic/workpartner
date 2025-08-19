@@ -70,7 +70,7 @@ namespace DataFixter.Services
                                 x.PointName == point.PointName);
                             if (currentResult.Count > 0)
                             {
-                                var perviousData1 = GetPreviousPeriodData(point, currentResult[0].FormattedTime);
+                                //var perviousData1 = GetPreviousPeriodData(point, currentResult[0].FormattedTime);
                                 // 检查是否可以修正
                                 var canFix = currentResult.Any(x => x.PointName == point.PointName && x.CanAdjustment);
                                 if (canFix)
@@ -150,52 +150,6 @@ namespace DataFixter.Services
                 _logger.FileError(ex, "修正所有监测点数据时发生异常");
                 result.Status = CorrectionStatus.Error;
                 result.Message = $"修正过程中发生异常: {ex.Message}";
-            }
-
-            return result;
-        }
-
-        public PointCorrectionResult CorrectPointSimple(MonitoringPoint point, List<ValidationResult> results)
-        {
-            var result = new PointCorrectionResult
-            {
-                PointName = point.PointName,
-                Status = CorrectionStatus.Success,
-                Message = "修正完成"
-            };
-
-            try
-            {
-                if (point.PeriodDataCount < 2)
-                {
-                    result.Message = "数据期数不足，无需修正";
-                    return result;
-                }
-
-                // 首先尝试全局分析和修正策略
-                var corrections = ApplyGlobalCorrectionStrategy(point);
-                if (corrections.Any())
-                {
-                    // 应用修正
-                    ApplyCorrections(corrections);
-                    result.CorrectedPeriods = corrections.Select(c => c.PeriodData).Distinct().Count();
-                    result.CorrectedValues = corrections.Count;
-
-                    _logger.FileInfo("监测点修正", $"修正了{result.CorrectedValues}个值",
-                        $"监测点：{point.PointName}，修正详情：{string.Join(", ", corrections.Select(c => $"{c.Direction}方向{c.CorrectionType}"))}");
-                }
-                else
-                {
-                    _logger.ConsoleInfo("{PointName} 没有需要修正的", point.PointName);
-
-                }
-            }
-            catch (Exception ex)
-            {
-                result.Status = CorrectionStatus.Error;
-                result.Message = $"修正过程中发生异常: {ex.Message}";
-                _logger.ShowError($"修正监测点 {point.PointName} 时发生异常: {ex.Message}");
-                _logger.FileError(ex, "修正监测点 {PointName} 时发生异常", point.PointName);
             }
 
             return result;
@@ -325,135 +279,363 @@ namespace DataFixter.Services
         private List<DataCorrection> AnalyzeAndCorrectDirection(List<PeriodData> sortedData, DataDirection direction, string pointName)
         {
             var corrections = new List<DataCorrection>();
-
-            // 计算每期的期望累计值
-            var expectedCumulatives = new List<double>();
-            var actualCumulatives = new List<double>();
-            var currentPeriodValues = new List<double>();
-
-            for (int i = 0; i < sortedData.Count; i++)
+            
+            // 按时间顺序分析数据，识别可调整区间
+            var adjustableSegments = FindAdjustableSegments(sortedData);
+            
+            foreach (var segment in adjustableSegments)
             {
-                var current = sortedData[i];
-                var (currentPeriodValue, cumulativeValue) = GetDirectionValue(current, direction);
-
-                currentPeriodValues.Add(currentPeriodValue);
-                actualCumulatives.Add(cumulativeValue);
-
-                if (i == 0)
+                var segmentCorrections = CorrectSegmentWithCumulativeLogic(sortedData, segment, direction);
+                corrections.AddRange(segmentCorrections);
+            }
+            
+            return corrections;
+        }
+        
+        /// <summary>
+        /// 使用累计值逻辑修正区间
+        /// </summary>
+        private List<DataCorrection> CorrectSegmentWithCumulativeLogic(List<PeriodData> sortedData, AdjustableSegment segment, DataDirection direction)
+        {
+            var corrections = new List<DataCorrection>();
+            var random = new Random();
+            var maxRetryAttempts = 20; // 增加尝试次数
+            var bestCorrections = new List<DataCorrection>();
+            var bestError = double.MaxValue;
+            
+            // 获取区间边界值
+            var previousCumulative = segment.PreviousFixedIndex >= 0 
+                ? GetDirectionValue(sortedData[segment.PreviousFixedIndex], direction).cumulativeValue 
+                : 0.0;
+            
+            var nextCumulative = segment.NextFixedIndex >= 0 
+                ? GetDirectionValue(sortedData[segment.NextFixedIndex], direction).cumulativeValue 
+                : double.NaN;
+            
+            // 尝试多次随机生成，选择最佳结果
+            for (int attempt = 0; attempt < maxRetryAttempts; attempt++)
+            {
+                var attemptCorrections = new List<DataCorrection>();
+                var currentCumulative = previousCumulative;
+                
+                // 如果区间内只有一期数据，随机生成本期变化量
+                if (segment.StartIndex == segment.EndIndex)
                 {
-                    // 第一期，期望累计值等于实际累计值
-                    expectedCumulatives.Add(cumulativeValue);
+                    var current = sortedData[segment.StartIndex];
+                    var (originalPeriodValue, originalCumulative) = GetDirectionValue(current, direction);
+                    
+                    // 计算期望的本期变化量
+                    var expectedPeriodValue = !double.IsNaN(nextCumulative) 
+                        ? nextCumulative - previousCumulative 
+                        : originalPeriodValue;
+                    
+                    // 随机生成本期变化量，但优先考虑能改善累计值关系的值
+                    var newPeriodValue = (random.NextDouble() - 0.5) * (2 * _options.RandomChangeRange); // 范围：-RandomChangeRange 到 +RandomChangeRange
+                    
+                    // 如果有下一期固定值，优先选择能改善累计值关系的值
+                    if (!double.IsNaN(nextCumulative))
+                    {
+                        // 计算当前随机值的累计值差异
+                        var randomCumulative = previousCumulative + newPeriodValue;
+                        var randomError = Math.Abs(randomCumulative - nextCumulative);
+                        
+                        // 计算保持原值的累计值差异
+                        var originalCumulativeValue = previousCumulative + originalPeriodValue;
+                        var originalError = Math.Abs(originalCumulativeValue - nextCumulative);
+                        
+                        // 如果随机值能改善累计值关系，使用它；否则保持原值
+                        if (randomError < originalError)
+                        {
+                            // 使用随机值，但确保累计值关系
+                            newPeriodValue = expectedPeriodValue;
+                        }
+                        else
+                        {
+                            // 保持原值，只调整累计值
+                            newPeriodValue = originalPeriodValue;
+                        }
+                    }
+                    
+                    var correctCumulative = previousCumulative + newPeriodValue;
+                    
+                    var correction = new DataCorrection
+                    {
+                        PeriodData = current,
+                        Direction = direction,
+                        CorrectionType = CorrectionType.Both,
+                        OriginalValue = originalPeriodValue,
+                        CorrectedValue = newPeriodValue,
+                        Reason = $"第{attempt + 1}次尝试：智能选择本期变化量，确保累计值关系正确",
+                        AdditionalData = new Dictionary<string, object>
+                        {
+                            { "CorrectedCumulative", correctCumulative },
+                            { "Attempt", attempt + 1 },
+                            { "AdjustmentType", "SmartSelection" }
+                        }
+                    };
+                    attemptCorrections.Add(correction);
+                    currentCumulative = correctCumulative;
                 }
                 else
                 {
-                    // 后续期，期望累计值 = 上期期望累计值 + 本期变化量
-                    var expectedCumulative = expectedCumulatives[i - 1] + currentPeriodValue;
-                    expectedCumulatives.Add(expectedCumulative);
-                }
-            }
-
-            // 检查是否需要修正
-            var needsCorrection = false;
-            for (int i = 1; i < sortedData.Count; i++)
-            {
-                var difference = FloatingPointUtils.SafeAbsoluteDifference(expectedCumulatives[i], actualCumulatives[i]);
-                if (FloatingPointUtils.IsGreaterThan(difference, _options.CumulativeTolerance, _options.CumulativeTolerance))
-                {
-                    needsCorrection = true;
-                    break;
-                }
-            }
-
-            if (!needsCorrection)
-            {
-                return corrections; // 无需修正
-            }
-
-            // 应用修正策略：优先修正本期变化量，保持累计值不变
-            for (int i = 1; i < sortedData.Count; i++)
-            {
-                var current = sortedData[i];
-                var difference = FloatingPointUtils.SafeAbsoluteDifference(expectedCumulatives[i], actualCumulatives[i]);
-
-                if (FloatingPointUtils.IsGreaterThan(difference, _options.CumulativeTolerance, _options.CumulativeTolerance))
-                {
-                    var originalPeriodValue = currentPeriodValues[i];
-                    var originalCumulative = actualCumulatives[i];
-
-                    // 优先修正本期变化量：计算需要调整的本期变化量来使累计值一致
-                    var requiredPeriodValue = actualCumulatives[i] - expectedCumulatives[i - 1];
-
-                    // 检查调整后的本期变化量是否在合理范围内
-                    if (FloatingPointUtils.IsLessThanOrEqual(FloatingPointUtils.SafeAbs(requiredPeriodValue), _options.MaxCurrentPeriodValue, _options.CumulativeTolerance))
+                    // 多期数据，随机生成本期变化量
+                    var segmentLength = segment.EndIndex - segment.StartIndex + 1;
+                    var periodValues = new List<double>();
+                    
+                    for (int i = 0; i < segmentLength; i++)
                     {
-                        // 确保本期变化量不为0，最小值为正负0.01
-                        if (FloatingPointUtils.IsLessThan(FloatingPointUtils.SafeAbs(requiredPeriodValue), 0.01, _options.CumulativeTolerance))
+                        var current = sortedData[segment.StartIndex + i];
+                        var (originalPeriodValue, _) = GetDirectionValue(current, direction);
+                        
+                        // 随机生成本期变化量，保持波动性
+                        var newPeriodValue = (random.NextDouble() - 0.5) * (2 * _options.RandomChangeRange); // 范围：-RandomChangeRange 到 +RandomChangeRange
+                        
+                        // 对于最后一期，如果有下一期固定值，调整确保累计值关系
+                        if (i == segmentLength - 1 && !double.IsNaN(nextCumulative))
                         {
-                            requiredPeriodValue = 0.01 * Math.Sign(requiredPeriodValue);
+                            var remainingChange = nextCumulative - currentCumulative;
+                            // 如果随机值在合理范围内，使用它；否则调整
+                            if (Math.Abs(newPeriodValue - remainingChange) <= 0.5)
+                            {
+                                newPeriodValue = remainingChange;
+                            }
+                            else
+                            {
+                                // 保持随机性，但确保累计值关系
+                                newPeriodValue = remainingChange;
+                            }
                         }
-
+                        
+                        // 确保本期变化量在合理范围内
+                        newPeriodValue = Math.Max(-1.0, Math.Min(1.0, newPeriodValue));
+                        
+                        periodValues.Add(newPeriodValue);
+                        currentCumulative += newPeriodValue;
+                    }
+                    
+                    // 应用修正
+                    currentCumulative = previousCumulative;
+                    for (int i = 0; i < periodValues.Count; i++)
+                    {
+                        var current = sortedData[segment.StartIndex + i];
+                        var (originalPeriodValue, originalCumulative) = GetDirectionValue(current, direction);
+                        var newPeriodValue = periodValues[i];
+                        
+                        currentCumulative += newPeriodValue;
+                        
                         var correction = new DataCorrection
                         {
                             PeriodData = current,
                             Direction = direction,
-                            CorrectionType = CorrectionType.CurrentPeriodValue,
+                            CorrectionType = CorrectionType.Both,
                             OriginalValue = originalPeriodValue,
-                            CorrectedValue = requiredPeriodValue,
-                            Reason = $"修正本期变化量以保持数据一致性。新变化量: {requiredPeriodValue:F6}, 原变化量: {originalPeriodValue:F6}, 累计值保持不变: {originalCumulative:F6}"
+                            CorrectedValue = newPeriodValue,
+                            Reason = $"第{attempt + 1}次尝试：随机生成本期变化量，确保累计值关系正确",
+                            AdditionalData = new Dictionary<string, object>
+                            {
+                                { "CorrectedCumulative", currentCumulative },
+                                { "Attempt", attempt + 1 },
+                                { "AdjustmentType", "RandomGeneration" }
+                            }
                         };
-
-                        corrections.Add(correction);
-
-                        // 更新后续期的期望累计值，基于修正后的本期变化量
-                        for (int j = i + 1; j < sortedData.Count; j++)
-                        {
-                            if (j == i)
-                            {
-                                expectedCumulatives[j] = expectedCumulatives[j - 1] + requiredPeriodValue;
-                            }
-                            else
-                            {
-                                expectedCumulatives[j] = expectedCumulatives[j - 1] + currentPeriodValues[j];
-                            }
-                        }
-                    }
-                    else
-                    {
-                        // 本期变化量超出范围，需要调整累计值
-                        var maxAllowedPeriodValue = _options.MaxCurrentPeriodValue * Math.Sign(requiredPeriodValue);
-                        var adjustedCumulative = expectedCumulatives[i - 1] + maxAllowedPeriodValue;
-
-                        // 检查调整后的累计值是否在合理范围内
-                        if (FloatingPointUtils.IsLessThanOrEqual(FloatingPointUtils.SafeAbs(adjustedCumulative), _options.MaxCumulativeValue, _options.CumulativeTolerance))
-                        {
-                            var correction = new DataCorrection
-                            {
-                                PeriodData = current,
-                                Direction = direction,
-                                CorrectionType = CorrectionType.CumulativeValue,
-                                OriginalValue = originalCumulative,
-                                CorrectedValue = adjustedCumulative,
-                                Reason = $"本期变化量超出范围，调整累计值以保持数据一致性。新累计值: {adjustedCumulative:F6}, 原累计值: {originalCumulative:F6}, 本期变化量: {maxAllowedPeriodValue:F6}",
-                                AdditionalData = new Dictionary<string, object>
-                                {
-                                    { "AdjustedPeriodValue", maxAllowedPeriodValue },
-                                    { "OriginalPeriodValue", originalPeriodValue }
-                                }
-                            };
-
-                            corrections.Add(correction);
-
-                            // 更新后续期的期望累计值
-                            for (int j = i + 1; j < sortedData.Count; j++)
-                            {
-                                expectedCumulatives[j] = adjustedCumulative + currentPeriodValues.Skip(i + 1).Take(j - i).Sum();
-                            }
-                        }
+                        attemptCorrections.Add(correction);
                     }
                 }
+                
+                // 计算区间误差
+                var segmentError = 0.0;
+                if (!double.IsNaN(nextCumulative))
+                {
+                    // 有下一期固定值，计算与目标累计值的差异
+                    segmentError = Math.Abs(currentCumulative - nextCumulative);
+                }
+                else
+                {
+                    // 没有下一期固定值，只检查区间内部的累计值关系
+                    segmentError = 0.0;
+                    for (int i = segment.StartIndex + 1; i <= segment.EndIndex; i++)
+                    {
+                        var current = sortedData[i];
+                        var previous = sortedData[i - 1];
+                        var (currentPeriodValue, _) = GetDirectionValue(current, direction);
+                        var (_, prevCumulative) = GetDirectionValue(previous, direction);
+                        
+                        var expectedCumulative = prevCumulative + currentPeriodValue;
+                        var actualCumulative = GetDirectionValue(current, direction).cumulativeValue;
+                        segmentError += Math.Abs(expectedCumulative - actualCumulative);
+                    }
+                }
+                
+                // 如果这次尝试的结果更好，保存它
+                if (segmentError < bestError)
+                {
+                    bestError = segmentError;
+                    bestCorrections = attemptCorrections.ToList();
+                }
+                
+                // 如果误差已经很小，可以提前退出
+                if (segmentError < _options.CumulativeTolerance)
+                {
+                    break;
+                }
             }
-
+            
+            corrections.AddRange(bestCorrections);
             return corrections;
+        }
+        
+        /// <summary>
+        /// 查找可调整的数据区间
+        /// </summary>
+        private List<AdjustableSegment> FindAdjustableSegments(List<PeriodData> sortedData)
+        {
+            var segments = new List<AdjustableSegment>();
+            var startIndex = -1;
+            
+            for (int i = 0; i < sortedData.Count; i++)
+            {
+                var current = sortedData[i];
+                
+                if (current.CanAdjustment && startIndex == -1)
+                {
+                    // 找到可调整区间的开始
+                    startIndex = i;
+                }
+                else if (!current.CanAdjustment && startIndex != -1)
+                {
+                    // 找到可调整区间的结束
+                    segments.Add(new AdjustableSegment
+                    {
+                        StartIndex = startIndex,
+                        EndIndex = i - 1,
+                        PreviousFixedIndex = startIndex > 0 ? startIndex - 1 : -1,
+                        NextFixedIndex = i
+                    });
+                    startIndex = -1;
+                }
+            }
+            
+            // 处理最后一个可调整区间
+            if (startIndex != -1)
+            {
+                segments.Add(new AdjustableSegment
+                {
+                    StartIndex = startIndex,
+                    EndIndex = sortedData.Count - 1,
+                    PreviousFixedIndex = startIndex > 0 ? startIndex - 1 : -1,
+                    NextFixedIndex = -1
+                });
+            }
+            
+            return segments;
+        }
+        
+        /// <summary>
+        /// 修正单个可调整区间
+        /// </summary>
+        private List<DataCorrection> CorrectSegment(List<PeriodData> sortedData, AdjustableSegment segment, DataDirection direction, Random random, int maxRetryAttempts)
+        {
+            var corrections = new List<DataCorrection>();
+            var bestCorrections = new List<DataCorrection>();
+            var bestError = double.MaxValue;
+            
+            // 尝试多次随机生成，选择最佳结果
+            for (int attempt = 0; attempt < maxRetryAttempts; attempt++)
+            {
+                var attemptCorrections = new List<DataCorrection>();
+                var segmentError = 0.0;
+                
+                // 获取区间边界值
+                var previousCumulative = segment.PreviousFixedIndex >= 0 
+                    ? GetDirectionValue(sortedData[segment.PreviousFixedIndex], direction).cumulativeValue 
+                    : 0.0;
+                
+                var nextCumulative = segment.NextFixedIndex >= 0 
+                    ? GetDirectionValue(sortedData[segment.NextFixedIndex], direction).cumulativeValue 
+                    : double.NaN;
+                
+                // 随机生成本期变化量并计算累计值
+                var currentCumulative = previousCumulative;
+                for (int i = segment.StartIndex; i <= segment.EndIndex; i++)
+                {
+                    var current = sortedData[i];
+                    var (originalPeriodValue, originalCumulative) = GetDirectionValue(current, direction);
+                    
+                    // 随机生成本期变化量，绝对值小于配置的随机变化量范围
+                    var newPeriodValue = (random.NextDouble() - 0.5) * (2 * _options.RandomChangeRange); // 范围：-RandomChangeRange 到 +RandomChangeRange
+                    
+                    // 计算新的累计值
+                    currentCumulative += newPeriodValue;
+                    
+                    // 创建修正记录
+                    var correction = new DataCorrection
+                    {
+                        PeriodData = current,
+                        Direction = direction,
+                        CorrectionType = CorrectionType.Both,
+                        OriginalValue = originalPeriodValue,
+                        CorrectedValue = newPeriodValue,
+                        Reason = $"第{attempt + 1}次尝试：随机生成本期变化量，重新计算累计值",
+                        AdditionalData = new Dictionary<string, object>
+                        {
+                            { "CorrectedCumulative", currentCumulative },
+                            { "Attempt", attempt + 1 },
+                            { "AdjustmentType", "RandomGeneration" }
+                        }
+                    };
+                    attemptCorrections.Add(correction);
+                }
+                
+                // 计算区间误差
+                if (!double.IsNaN(nextCumulative))
+                {
+                    // 有下一期固定值，计算与目标累计值的差异
+                    segmentError = Math.Abs(currentCumulative - nextCumulative);
+                }
+                else
+                {
+                    // 没有下一期固定值，只检查区间内部的累计值关系
+                    segmentError = 0.0;
+                    for (int i = segment.StartIndex + 1; i <= segment.EndIndex; i++)
+                    {
+                        var current = sortedData[i];
+                        var previous = sortedData[i - 1];
+                        var (currentPeriodValue, _) = GetDirectionValue(current, direction);
+                        var (_, prevCumulative) = GetDirectionValue(previous, direction);
+                        
+                        var expectedCumulative = prevCumulative + currentPeriodValue;
+                        var actualCumulative = GetDirectionValue(current, direction).cumulativeValue;
+                        segmentError += Math.Abs(expectedCumulative - actualCumulative);
+                    }
+                }
+                
+                // 如果这次尝试的结果更好，保存它
+                if (segmentError < bestError)
+                {
+                    bestError = segmentError;
+                    bestCorrections = attemptCorrections.ToList();
+                }
+                
+                // 如果误差已经很小，可以提前退出
+                if (segmentError < _options.CumulativeTolerance)
+                {
+                    break;
+                }
+            }
+            
+            corrections.AddRange(bestCorrections);
+            return corrections;
+        }
+        
+        /// <summary>
+        /// 可调整数据区间的信息
+        /// </summary>
+        private class AdjustableSegment
+        {
+            public int StartIndex { get; set; }
+            public int EndIndex { get; set; }
+            public int PreviousFixedIndex { get; set; } // 前一个CanAdjustment=false的索引
+            public int NextFixedIndex { get; set; }     // 后一个CanAdjustment=false的索引
         }
 
         /// <summary>
@@ -703,55 +885,83 @@ namespace DataFixter.Services
                     continue;
                 }
 
+                // 检查 PeriodData 是否可以修正，如果不可以则跳过
+                //if (!correction.PeriodData.CanAdjustment)
+                //{
+                //    //_logger?.ConsoleInfo($"跳过修正 {correction.PeriodData.PointName} 第 {correction.PeriodData.RowNumber} 行 {correction.Direction} 方向，因为 CanAdjustment=false");
+                //    continue;
+                //}
+
                 switch (correction.Direction)
                 {
                     case DataDirection.X:
                         if (correction.CorrectionType == CorrectionType.CurrentPeriodValue || correction.CorrectionType == CorrectionType.Both)
+                        {
                             correction.PeriodData.CurrentPeriodX = correction.CorrectedValue;
+                            _logger?.ConsoleInfo($"修正 {correction.PeriodData.PointName} 第 {correction.PeriodData.RowNumber} 行 X方向本期变化量: {correction.OriginalValue:F3} → {correction.CorrectedValue:F3}");
+                        }
                         if (correction.CorrectionType == CorrectionType.CumulativeValue || correction.CorrectionType == CorrectionType.Both)
                         {
                             // 对于Both类型，需要从AdditionalData中获取累计值
                             if (correction.CorrectionType == CorrectionType.Both && correction.AdditionalData != null &&
                                 correction.AdditionalData.TryGetValue("CorrectedCumulative", out var cumulativeObj))
                             {
-                                correction.PeriodData.CumulativeX = Convert.ToDouble(cumulativeObj);
+                                var correctedCumulative = Convert.ToDouble(cumulativeObj);
+                                correction.PeriodData.CumulativeX = correctedCumulative;
+                                _logger?.ConsoleInfo($"修正 {correction.PeriodData.PointName} 第 {correction.PeriodData.RowNumber} 行 X方向累计值: {correction.PeriodData.GetCumulativeValue(DataDirection.X):F3} → {correctedCumulative:F3}");
                             }
                             else
                             {
                                 // 如果没有AdditionalData，使用CorrectedValue作为累计值
+                                var originalCumulative = correction.PeriodData.CumulativeX;
                                 correction.PeriodData.CumulativeX = correction.CorrectedValue;
+                                _logger?.ConsoleInfo($"修正 {correction.PeriodData.PointName} 第 {correction.PeriodData.RowNumber} 行 X方向累计值: {originalCumulative:F3} → {correction.CorrectedValue:F3}");
                             }
                         }
                         break;
                     case DataDirection.Y:
                         if (correction.CorrectionType == CorrectionType.CurrentPeriodValue || correction.CorrectionType == CorrectionType.Both)
+                        {
                             correction.PeriodData.CurrentPeriodY = correction.CorrectedValue;
+                            _logger?.ConsoleInfo($"修正 {correction.PeriodData.PointName} 第 {correction.PeriodData.RowNumber} 行 Y方向本期变化量: {correction.OriginalValue:F3} → {correction.CorrectedValue:F3}");
+                        }
                         if (correction.CorrectionType == CorrectionType.CumulativeValue || correction.CorrectionType == CorrectionType.Both)
                         {
                             if (correction.CorrectionType == CorrectionType.Both && correction.AdditionalData != null &&
                                 correction.AdditionalData.TryGetValue("CorrectedCumulative", out var cumulativeObj))
                             {
-                                correction.PeriodData.CumulativeY = Convert.ToDouble(cumulativeObj);
+                                var correctedCumulative = Convert.ToDouble(cumulativeObj);
+                                correction.PeriodData.CumulativeY = correctedCumulative;
+                                _logger?.ConsoleInfo($"修正 {correction.PeriodData.PointName} 第 {correction.PeriodData.RowNumber} 行 Y方向累计值: {correction.PeriodData.GetCumulativeValue(DataDirection.Y):F3} → {correctedCumulative:F3}");
                             }
                             else
                             {
+                                var originalCumulative = correction.PeriodData.CumulativeY;
                                 correction.PeriodData.CumulativeY = correction.CorrectedValue;
+                                _logger?.ConsoleInfo($"修正 {correction.PeriodData.PointName} 第 {correction.PeriodData.RowNumber} 行 Y方向累计值: {originalCumulative:F3} → {correction.CorrectedValue:F3}");
                             }
                         }
                         break;
                     case DataDirection.Z:
                         if (correction.CorrectionType == CorrectionType.CurrentPeriodValue || correction.CorrectionType == CorrectionType.Both)
+                        {
                             correction.PeriodData.CurrentPeriodZ = correction.CorrectedValue;
+                            _logger?.ConsoleInfo($"修正 {correction.PeriodData.PointName} 第 {correction.PeriodData.RowNumber} 行 Z方向本期变化量: {correction.OriginalValue:F3} → {correction.CorrectedValue:F3}");
+                        }
                         if (correction.CorrectionType == CorrectionType.CumulativeValue || correction.CorrectionType == CorrectionType.Both)
                         {
                             if (correction.CorrectionType == CorrectionType.Both && correction.AdditionalData != null &&
                                 correction.AdditionalData.TryGetValue("CorrectedCumulative", out var cumulativeObj))
                             {
-                                correction.PeriodData.CumulativeZ = Convert.ToDouble(cumulativeObj);
+                                var correctedCumulative = Convert.ToDouble(cumulativeObj);
+                                correction.PeriodData.CumulativeZ = correctedCumulative;
+                                _logger?.ConsoleInfo($"修正 {correction.PeriodData.PointName} 第 {correction.PeriodData.RowNumber} 行 Z方向累计值: {correction.PeriodData.GetCumulativeValue(DataDirection.Z):F3} → {correctedCumulative:F3}");
                             }
                             else
                             {
+                                var originalCumulative = correction.PeriodData.CumulativeZ;
                                 correction.PeriodData.CumulativeZ = correction.CorrectedValue;
+                                _logger?.ConsoleInfo($"修正 {correction.PeriodData.PointName} 第 {correction.PeriodData.RowNumber} 行 Z方向累计值: {originalCumulative:F3} → {correction.CorrectedValue:F3}");
                             }
                         }
                         break;
@@ -1636,36 +1846,7 @@ namespace DataFixter.Services
         }
     }
 
-    /// <summary>
-    /// 修正选项
-    /// </summary>
-    public class CorrectionOptions
-    {
-        /// <summary>
-        /// 最大本期变化量
-        /// </summary>
-        public double MaxCurrentPeriodValue { get; set; } = 1.0;
-
-        /// <summary>
-        /// 最大累计变化量
-        /// </summary>
-        public double MaxCumulativeValue { get; set; } = 4.0;
-
-        /// <summary>
-        /// 是否启用最小化修改策略
-        /// </summary>
-        public bool EnableMinimalModification { get; set; } = true;
-
-        /// <summary>
-        /// 累计值容差
-        /// </summary>
-        public double CumulativeTolerance { get; set; } = 1e-6;
-
-        /// <summary>
-        /// 最小值阈值
-        /// </summary>
-        public double MinValueThreshold { get; set; } = 1e-9;
-    }
+    // CorrectionOptions 类已移动到 Models/CorrectionModels.cs
 
     // DataCorrection 和 CorrectionType 已移动到 Models/CorrectionModels.cs
 
