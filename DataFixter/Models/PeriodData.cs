@@ -100,6 +100,12 @@ namespace DataFixter.Models
         public List<AdjustmentRecord> Adjustments { get; set; } = new List<AdjustmentRecord>();
 
         /// <summary>
+        /// 是否可以修正
+        /// 如果原始数据中已经存在的，则尽可能不要修改原来的数据
+        /// </summary>
+        public bool CanAdjustment { get; set; }
+
+        /// <summary>
         /// 构造函数
         /// </summary>
         public PeriodData()

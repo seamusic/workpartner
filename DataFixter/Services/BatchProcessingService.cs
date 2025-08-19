@@ -52,18 +52,29 @@ namespace DataFixter.Services
                 // 步骤5.5: 修正后重新验证数据
                 var correctedValidationResults = ValidateCorrectedData(monitoringPoints);
 
-                // 步骤6: 生成输出文件
-                var (outputResult, reportResult) = GenerateOutputFiles(monitoringPoints, validationResults, correctionResult, processedDirectory);
+                // 步骤5.6: 添加数值超限检查
+                var limitValidationResults = ValidateValueLimits(monitoringPoints);
 
-                // 步骤7: 生成数据对比报告
+                // 步骤5.7: 生成数据对比报告
                 GenerateDataComparisonReport(processedResults, comparisonResults, correctionResult, processedDirectory);
 
-                // 更新结果
-                UpdateProcessingResult(result, processedResults, comparisonResults, monitoringPoints, 
-                    validationResults, correctionResult, outputResult, reportResult);
+                if (limitValidationResults.Any())
+                {
+                    _logger.LogOperationComplete("批量处理", "不成功",
+                        $"修正后错误仍然有：{limitValidationResults.Count}条");
+                }
+                else
+                {
+                    // 步骤6: 生成输出文件
+                    var (outputResult, reportResult) = GenerateOutputFiles(monitoringPoints, validationResults, correctionResult, processedDirectory);
 
-                _logger.LogOperationComplete("批量处理", "成功完成", 
-                    $"处理文件：{processedResults.Count}个，监测点：{monitoringPoints.Count}个，修正记录：{correctionResult.AdjustmentRecords.Count}条");
+                    // 更新结果
+                    UpdateProcessingResult(result, processedResults, comparisonResults, monitoringPoints,
+                        validationResults, correctionResult, outputResult, reportResult);
+
+                    _logger.LogOperationComplete("批量处理", "成功完成",
+                        $"处理文件：{processedResults.Count}个，监测点：{monitoringPoints.Count}个，修正记录：{correctionResult.AdjustmentRecords.Count}条");
+                }
             }
             catch (Exception ex)
             {
@@ -184,7 +195,7 @@ namespace DataFixter.Services
                     if (hasChanges)
                     {
                         mergeCount++;
-                        _logger.ConsoleInfo($"合并数据: {data.PointName} - {data.FormattedTime} - 行号:{data.RowNumber}");
+                        //_logger.ConsoleInfo($"合并数据: {data.PointName} - {data.FormattedTime} - 行号:{data.RowNumber}");
                     }
                 }
             }
@@ -231,7 +242,9 @@ namespace DataFixter.Services
             var validationOptions = configService.GetValidationOptions();
             
             var validationService = new DataValidationService(Log.ForContext<DataValidationService>(), validationOptions);
-            var validationResults = validationService.ValidateAllPoints(monitoringPoints, normalizedComparisonData);
+            
+            // 添加超时保护和进度监控
+            var validationResults = ValidateDataWithTimeout(validationService, monitoringPoints, normalizedComparisonData);
 
             var validCount = validationResults.Count(v => v.Status == ValidationStatus.Valid);
             var invalidCount = validationResults.Count(v => v.Status == ValidationStatus.Invalid);
@@ -240,6 +253,84 @@ namespace DataFixter.Services
 
             _logger.ShowComplete($"验证完成: 通过 {validCount} 条, 失败 {invalidCount} 条, 需要修正 {needsAdjustmentCount} 条, 可以修正 {canAdjustmentCount} 条");
 
+            return validationResults;
+        }
+
+        /// <summary>
+        /// 带超时保护的数据验证
+        /// </summary>
+        /// <param name="validationService">验证服务</param>
+        /// <param name="monitoringPoints">监测点列表</param>
+        /// <param name="normalizedComparisonData">对比数据</param>
+        /// <returns>验证结果列表</returns>
+        private List<ValidationResult> ValidateDataWithTimeout(DataValidationService validationService, 
+            List<MonitoringPoint> monitoringPoints, List<PeriodData> normalizedComparisonData)
+        {
+            var validationResults = new List<ValidationResult>();
+            var totalPoints = monitoringPoints.Count;
+            var startTime = DateTime.Now;
+            
+            // 获取验证选项
+            var configService = new ConfigurationService(Log.ForContext<ConfigurationService>());
+            var validationOptions = configService.GetValidationOptions();
+            
+            var maxProcessingTime = TimeSpan.FromMinutes(validationOptions.MaxProcessingTimeMinutes);
+            var batchSize = validationOptions.BatchSize;
+            var enableMemoryCleanup = validationOptions.EnableMemoryCleanup;
+            var memoryCleanupFrequency = validationOptions.MemoryCleanupFrequency;
+            
+            _logger.ConsoleInfo($"开始验证 {totalPoints} 个监测点，最大处理时间: {maxProcessingTime.TotalMinutes} 分钟，批处理大小: {batchSize}");
+            
+            try
+            {
+                // 分批处理监测点，避免长时间阻塞
+                var processedPoints = 0;
+                
+                for (int i = 0; i < totalPoints; i += batchSize)
+                {
+                    // 检查是否超时
+                    if (DateTime.Now - startTime > maxProcessingTime)
+                    {
+                        _logger.ShowWarning($"数据验证超时，已处理 {processedPoints}/{totalPoints} 个监测点");
+                        break;
+                    }
+                    
+                    var batchEnd = Math.Min(i + batchSize, totalPoints);
+                    var batch = monitoringPoints.Skip(i).Take(batchSize).ToList();
+                    
+                    _logger.ConsoleInfo($"处理批次 {i/batchSize + 1}: 监测点 {i+1} 到 {batchEnd}");
+                    
+                    var batchResults = validationService.ValidateAllPoints(batch, normalizedComparisonData);
+                    validationResults.AddRange(batchResults);
+                    
+                    processedPoints += batch.Count;
+                    var elapsed = DateTime.Now - startTime;
+                    var estimatedTotal = elapsed.TotalSeconds * totalPoints / processedPoints;
+                    var remaining = estimatedTotal - elapsed.TotalSeconds;
+                    
+                    _logger.ConsoleInfo($"批次完成: {processedPoints}/{totalPoints} 个监测点，已用时: {elapsed:mm\\:ss}，预计剩余: {TimeSpan.FromSeconds(remaining):mm\\:ss}");
+                    
+                    // 根据配置决定是否执行内存清理
+                    if (enableMemoryCleanup && processedPoints % memoryCleanupFrequency == 0)
+                    {
+                        GC.Collect();
+                        GC.WaitForPendingFinalizers();
+                        _logger.ConsoleInfo("执行内存清理");
+                    }
+                }
+                
+                var totalElapsed = DateTime.Now - startTime;
+                _logger.ConsoleInfo($"数据验证完成，总用时: {totalElapsed:mm\\:ss}，处理监测点: {processedPoints}/{totalPoints}");
+            }
+            catch (Exception ex)
+            {
+                _logger.ShowError($"数据验证过程中发生异常: {ex.Message}");
+                _logger.FileError(ex, "数据验证过程中发生异常");
+                
+                // 如果验证失败，返回空的验证结果，避免后续步骤失败
+                return new List<ValidationResult>();
+            }
+            
             return validationResults;
         }
 
@@ -274,10 +365,6 @@ namespace DataFixter.Services
             var correctionService = new DataCorrectionService(Log.ForContext<DataCorrectionService>(), correctionOptions);
             
             var correctedValidationResults = correctionService.ValidateCorrectedMonitoringPoints(monitoringPoints);
-            
-            // 添加数值超限检查
-            var limitValidationResults = ValidateValueLimits(monitoringPoints);
-            correctedValidationResults.AddRange(limitValidationResults);
             
             var correctedValidCount = correctedValidationResults.Count(v => v.Status == ValidationStatus.Valid);
             var correctedInvalidCount = correctedValidationResults.Count(v => v.Status == ValidationStatus.Invalid);

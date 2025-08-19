@@ -4,6 +4,8 @@ using System.Linq;
 using DataFixter.Models;
 using DataFixter.Utils;
 using Serilog;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace DataFixter.Services
 {
@@ -37,36 +39,57 @@ namespace DataFixter.Services
             var validationResults = new List<ValidationResult>();
             var totalPoints = monitoringPoints.Count;
             var processedPoints = 0;
+            var lockObject = new object();
 
             try
             {
                 _logger.Information("开始验证 {TotalPoints} 个监测点的数据逻辑", totalPoints);
 
-                foreach (var point in monitoringPoints)
+                // 使用并行计算来提升性能，因为每个监测点之间没有依赖关系
+                var parallelOptions = new ParallelOptions
+                {
+                    MaxDegreeOfParallelism = _options.MaxDegreeOfParallelism > 0 
+                        ? _options.MaxDegreeOfParallelism 
+                        : Environment.ProcessorCount, // 如果未配置，使用CPU核心数
+                    CancellationToken = CancellationToken.None
+                };
+
+                _logger.Information("使用并行计算，并行度: {MaxDegreeOfParallelism}", parallelOptions.MaxDegreeOfParallelism);
+
+                // 并行处理所有监测点
+                Parallel.ForEach(monitoringPoints, parallelOptions, point =>
                 {
                     try
                     {
                         var pointResults = ValidateSinglePoint(point, comparisonData);
-                        validationResults.AddRange(pointResults);
-                        processedPoints++;
-
-                        if (processedPoints % 100 == 0)
+                        
+                        // 线程安全地添加结果
+                        lock (lockObject)
                         {
-                            _logger.Information("已处理 {ProcessedPoints}/{TotalPoints} 个监测点", processedPoints, totalPoints);
+                            validationResults.AddRange(pointResults);
+                            processedPoints++;
+
+                            if (processedPoints % 100 == 0)
+                            {
+                                _logger.Information("已处理 {ProcessedPoints}/{TotalPoints} 个监测点", processedPoints, totalPoints);
+                            }
                         }
                     }
                     catch (Exception ex)
                     {
                         _logger.Error(ex, "验证监测点 {PointName} 时发生异常", point.PointName);
 
-                        // 添加验证失败的结果
-                        validationResults.Add(new ValidationResult(ValidationStatus.Invalid, "系统异常", $"验证过程中发生异常: {ex.Message}")
+                        // 线程安全地添加验证失败的结果
+                        lock (lockObject)
                         {
-                            PointName = point.PointName,
-                            Severity = ValidationSeverity.Critical
-                        });
+                            validationResults.Add(new ValidationResult(ValidationStatus.Invalid, "系统异常", $"验证过程中发生异常: {ex.Message}")
+                            {
+                                PointName = point.PointName,
+                                Severity = ValidationSeverity.Critical
+                            });
+                        }
                     }
-                }
+                });
 
                 _logger.Information("数据验证完成: 总计 {TotalPoints} 个监测点, 生成 {ResultCount} 个验证结果",
                     totalPoints, validationResults.Count);
@@ -106,6 +129,7 @@ namespace DataFixter.Services
                 // 如果直接校验正确，都不需要校验其它了，直接当这行记录是不需要修改的
                 if (cumulativeValidationResults.Count == 0)
                 {
+                    _logger.Information("验证监测点 {PointName} 正确，不需要再校验", point.PointName);
                     results.Add(new ValidationResult(ValidationStatus.Valid, "数据验证", "累计变化量计算逻辑规则通过，不需要考虑其它处理了")
                     {
                         PointName = point.PointName,
@@ -677,6 +701,31 @@ namespace DataFixter.Services
         /// 最大时间间隔（天）
         /// </summary>
         public double MaxTimeInterval { get; set; } = 30.0;
+
+        /// <summary>
+        /// 数据验证最大处理时间（分钟）
+        /// </summary>
+        public int MaxProcessingTimeMinutes { get; set; } = 30;
+
+        /// <summary>
+        /// 批处理大小
+        /// </summary>
+        public int BatchSize { get; set; } = 50;
+
+        /// <summary>
+        /// 是否启用内存清理
+        /// </summary>
+        public bool EnableMemoryCleanup { get; set; } = true;
+
+        /// <summary>
+        /// 内存清理频率（每处理多少个监测点清理一次）
+        /// </summary>
+        public int MemoryCleanupFrequency { get; set; } = 200;
+
+        /// <summary>
+        /// 并行度
+        /// </summary>
+        public int MaxDegreeOfParallelism { get; set; } = 0; // 0 表示不限制，使用 CPU 核心数
     }
 
     /// <summary>

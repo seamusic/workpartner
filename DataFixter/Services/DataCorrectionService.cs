@@ -216,7 +216,7 @@ namespace DataFixter.Services
                 // 首先尝试全局分析和修正策略
                 var corrections = ApplyGlobalCorrectionStrategy(point);
 
-                // 检查是否需要更激进的策略
+                // 检查是否再进行修正
                 var needsAggressiveStrategy = false;
 
                 if (corrections.Any())
@@ -246,78 +246,6 @@ namespace DataFixter.Services
                         _logger.ShowWarning($"监测点 {point.PointName} 全局策略未产生修正，但数据验证失败，需要激进策略");
                         _logger.FileWarning("监测点 {PointName} 全局策略未产生修正，但数据验证失败，需要激进策略", point.PointName);
                     }
-                }
-
-                // 如果需要激进策略，直接应用激进策略（不回滚之前的修正）
-                if (needsAggressiveStrategy)
-                {
-                    _logger.ConsoleInfo("监测点 {PointName} 应用激进修正策略", point.PointName);
-                    _logger.FileInfo("监测点 {PointName} 应用激进修正策略，开始应用激进修正算法", point.PointName);
-                    var aggressiveCorrections = ApplyAggressiveCorrectionStrategy(point);
-
-                    if (aggressiveCorrections.Any())
-                    {
-                        ApplyCorrections(aggressiveCorrections);
-                        result.CorrectedPeriods = aggressiveCorrections.Select(c => c.PeriodData).Distinct().Count();
-                        result.CorrectedValues = aggressiveCorrections.Count;
-
-                        // 再次验证
-                        var finalValidation = ValidatePointDataConsistency(point);
-                        if (finalValidation.Status == ValidationStatus.Invalid)
-                        {
-                            _logger.ShowWarning($"激进策略后数据仍然无效: {finalValidation.Description}");
-                            _logger.FileWarning("激进策略后数据仍然无效: {Description}", finalValidation.Description);
-
-                            // 检查失败比例，如果低于20%，使用部分修正策略
-                            var failureRatio = CalculateValidationFailureRatio(point, finalValidation);
-                            if (failureRatio < 0.2) // 失败比例低于20%
-                            {
-                                _logger.ConsoleInfo("激进策略后失败比例较低 ({0:P1})，使用部分修正策略", failureRatio);
-                                _logger.FileInfo("激进策略后失败比例较低 ({FailureRatio:P1})，使用部分修正策略", failureRatio);
-                                var partialCorrections = ApplyPartialCorrectionStrategy(point, finalValidation);
-                                if (partialCorrections.Any())
-                                {
-                                    ApplyCorrections(partialCorrections);
-                                    result.CorrectedPeriods = partialCorrections.Select(c => c.PeriodData).Distinct().Count();
-                                    result.CorrectedValues = partialCorrections.Count;
-                                    _logger.ConsoleInfo("部分修正策略完成，修正了 {0} 个值", partialCorrections.Count);
-                                    _logger.FileInfo("部分修正策略完成，修正了 {Count} 个值", partialCorrections.Count);
-                                }
-                            }
-                            else
-                            {
-                                // 失败比例较高，使用最终修正策略
-                                _logger.ConsoleInfo("激进策略后失败比例较高 ({0:P1})，使用最终修正策略", failureRatio);
-                                _logger.FileInfo("激进策略后失败比例较高 ({FailureRatio:P1})，使用最终修正策略", failureRatio);
-                                var finalCorrections = ApplyFinalCorrectionStrategy(point);
-                                if (finalCorrections.Any())
-                                {
-                                    // 应用最终修正（不回滚之前的修正）
-                                    ApplyCorrections(finalCorrections);
-                                    result.CorrectedPeriods = finalCorrections.Select(c => c.PeriodData).Distinct().Count();
-                                    result.CorrectedValues = finalCorrections.Count;
-
-                                    _logger.ConsoleInfo("应用最终修正策略完成");
-                                    _logger.FileInfo("应用最终修正策略完成");
-                                }
-                            }
-                        }
-                        else
-                        {
-                            _logger.ConsoleInfo("激进策略修正成功，数据验证通过");
-                            _logger.FileInfo("激进策略修正成功，数据验证通过");
-                        }
-                    }
-                    else
-                    {
-                        _logger.ShowWarning("激进策略未产生任何修正");
-                        _logger.FileWarning("激进策略未产生任何修正");
-                    }
-                }
-                else if (corrections.Any())
-                {
-                    _logger.ConsoleInfo("监测点 {0} 修正后数据验证通过", point.PointName);
-                    _logger.FileInfo("监测点 {PointName} 修正后数据验证通过", point.PointName);
                 }
 
                 // 记录调整记录
@@ -431,7 +359,7 @@ namespace DataFixter.Services
                 return corrections; // 无需修正
             }
 
-            // 应用修正策略：优先修正累计值，保持本期变化量不变
+            // 应用修正策略：优先修正本期变化量，保持累计值不变
             for (int i = 1; i < sortedData.Count; i++)
             {
                 var current = sortedData[i];
@@ -439,74 +367,76 @@ namespace DataFixter.Services
 
                 if (FloatingPointUtils.IsGreaterThan(difference, _options.CumulativeTolerance, _options.CumulativeTolerance))
                 {
+                    var originalPeriodValue = currentPeriodValues[i];
                     var originalCumulative = actualCumulatives[i];
-                    var correctedCumulative = expectedCumulatives[i];
-
-                    // 检查修正后的累计值是否在合理范围内
-                    if (FloatingPointUtils.IsLessThanOrEqual(FloatingPointUtils.SafeAbs(correctedCumulative), _options.MaxCumulativeValue, _options.CumulativeTolerance))
+                    
+                    // 优先修正本期变化量：计算需要调整的本期变化量来使累计值一致
+                    var requiredPeriodValue = actualCumulatives[i] - expectedCumulatives[i - 1];
+                    
+                    // 检查调整后的本期变化量是否在合理范围内
+                    if (FloatingPointUtils.IsLessThanOrEqual(FloatingPointUtils.SafeAbs(requiredPeriodValue), _options.MaxCurrentPeriodValue, _options.CumulativeTolerance))
                     {
+                        // 确保本期变化量不为0，最小值为正负0.01
+                        if (FloatingPointUtils.IsLessThan(FloatingPointUtils.SafeAbs(requiredPeriodValue), 0.01, _options.CumulativeTolerance))
+                        {
+                            requiredPeriodValue = 0.01 * Math.Sign(requiredPeriodValue);
+                        }
+                        
                         var correction = new DataCorrection
                         {
                             PeriodData = current,
                             Direction = direction,
-                            CorrectionType = CorrectionType.CumulativeValue,
-                            OriginalValue = originalCumulative,
-                            CorrectedValue = correctedCumulative,
-                            Reason = $"修正累计值以保持数据一致性。期望值: {correctedCumulative:F6}, 原值: {originalCumulative:F6}"
+                            CorrectionType = CorrectionType.CurrentPeriodValue,
+                            OriginalValue = originalPeriodValue,
+                            CorrectedValue = requiredPeriodValue,
+                            Reason = $"修正本期变化量以保持数据一致性。新变化量: {requiredPeriodValue:F6}, 原变化量: {originalPeriodValue:F6}, 累计值保持不变: {originalCumulative:F6}"
                         };
 
                         corrections.Add(correction);
 
-                        // 更新后续期的期望累计值
+                        // 更新后续期的期望累计值，基于修正后的本期变化量
                         for (int j = i + 1; j < sortedData.Count; j++)
                         {
-                            expectedCumulatives[j] = correctedCumulative + currentPeriodValues.Skip(i + 1).Take(j - i).Sum();
+                            if (j == i)
+                            {
+                                expectedCumulatives[j] = expectedCumulatives[j - 1] + requiredPeriodValue;
+                            }
+                            else
+                            {
+                                expectedCumulatives[j] = expectedCumulatives[j - 1] + currentPeriodValues[j];
+                            }
                         }
                     }
                     else
                     {
-                        // 累计值超出范围，需要调整本期变化量
-                        var maxAllowedCumulative = _options.MaxCumulativeValue * Math.Sign(correctedCumulative);
-                        var adjustedPeriodValue = maxAllowedCumulative - expectedCumulatives[i - 1];
+                        // 本期变化量超出范围，需要调整累计值
+                        var maxAllowedPeriodValue = _options.MaxCurrentPeriodValue * Math.Sign(requiredPeriodValue);
+                        var adjustedCumulative = expectedCumulatives[i - 1] + maxAllowedPeriodValue;
 
-                        // 确保本期变化量不为0，最小值为正负0.01
-                        if (FloatingPointUtils.IsLessThan(FloatingPointUtils.SafeAbs(adjustedPeriodValue), 0.01, _options.CumulativeTolerance))
-                        {
-                            // 如果调整后的值过小，使用最小值
-                            adjustedPeriodValue = 0.01 * Math.Sign(adjustedPeriodValue);
-                        }
-
-                        // 检查调整后的本期变化量是否合理
-                        if (FloatingPointUtils.IsLessThanOrEqual(FloatingPointUtils.SafeAbs(adjustedPeriodValue), _options.MaxCurrentPeriodValue, _options.CumulativeTolerance))
+                        // 检查调整后的累计值是否在合理范围内
+                        if (FloatingPointUtils.IsLessThanOrEqual(FloatingPointUtils.SafeAbs(adjustedCumulative), _options.MaxCumulativeValue, _options.CumulativeTolerance))
                         {
                             var correction = new DataCorrection
                             {
                                 PeriodData = current,
                                 Direction = direction,
-                                CorrectionType = CorrectionType.Both,
-                                OriginalValue = currentPeriodValues[i],
-                                CorrectedValue = adjustedPeriodValue,
-                                Reason = $"调整本期变化量以保持累计值在合理范围内。新变化量: {adjustedPeriodValue:F6}, 原变化量: {currentPeriodValues[i]:F6}",
+                                CorrectionType = CorrectionType.CumulativeValue,
+                                OriginalValue = originalCumulative,
+                                CorrectedValue = adjustedCumulative,
+                                Reason = $"本期变化量超出范围，调整累计值以保持数据一致性。新累计值: {adjustedCumulative:F6}, 原累计值: {originalCumulative:F6}, 本期变化量: {maxAllowedPeriodValue:F6}",
                                 AdditionalData = new Dictionary<string, object>
                                 {
-                                    { "CorrectedCumulative", expectedCumulatives[i - 1] + adjustedPeriodValue },
-                                    { "OriginalCumulative", expectedCumulatives[i] }
+                                    { "AdjustedPeriodValue", maxAllowedPeriodValue },
+                                    { "OriginalPeriodValue", originalPeriodValue }
                                 }
                             };
 
                             corrections.Add(correction);
 
                             // 更新后续期的期望累计值
-                            for (int j = i; j < sortedData.Count; j++)
+                            for (int j = i + 1; j < sortedData.Count; j++)
                             {
-                                if (j == i)
-                                {
-                                    expectedCumulatives[j] = expectedCumulatives[j - 1] + adjustedPeriodValue;
-                                }
-                                else
-                                {
-                                    expectedCumulatives[j] = expectedCumulatives[j - 1] + currentPeriodValues[j];
-                                }
+                                expectedCumulatives[j] = adjustedCumulative + currentPeriodValues.Skip(i + 1).Take(j - i).Sum();
                             }
                         }
                     }

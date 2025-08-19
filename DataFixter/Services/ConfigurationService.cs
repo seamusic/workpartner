@@ -54,7 +54,15 @@ namespace DataFixter.Services
                     options.MileageTolerance = section.GetValue<double>("MileageTolerance", 0.01);
                     options.MaxTimeInterval = section.GetValue<double>("MaxTimeInterval", 30.0);
                     
-                    _logger.Information("从配置文件加载验证选项: 累计变化量容差={CumulativeTolerance}", options.CumulativeTolerance);
+                    // 新增的超时和批处理配置
+                    options.MaxProcessingTimeMinutes = section.GetValue<int>("MaxProcessingTimeMinutes", 30);
+                    options.BatchSize = section.GetValue<int>("BatchSize", 50);
+                    options.EnableMemoryCleanup = section.GetValue<bool>("EnableMemoryCleanup", true);
+                    options.MemoryCleanupFrequency = section.GetValue<int>("MemoryCleanupFrequency", 200);
+                    options.MaxDegreeOfParallelism = section.GetValue<int>("MaxDegreeOfParallelism", 0);
+                    
+                    _logger.Information("从配置文件加载验证选项: 累计变化量容差={CumulativeTolerance}, 最大处理时间={MaxProcessingTimeMinutes}分钟, 批处理大小={BatchSize}, 并行度={MaxDegreeOfParallelism}", 
+                        options.CumulativeTolerance, options.MaxProcessingTimeMinutes, options.BatchSize, options.MaxDegreeOfParallelism);
                 }
                 else
                 {
