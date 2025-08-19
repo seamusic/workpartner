@@ -75,6 +75,16 @@ namespace DataFixter.Services
                                 var canFix = currentResult.Any(x => x.PointName == point.PointName && x.CanAdjustment);
                                 if (canFix)
                                 {
+                                    foreach (ValidationResult validationResult in currentResult)
+                                    {
+                                        foreach (PeriodData periodData in point.PeriodDataList)
+                                        {
+                                            if (periodData.PointName == validationResult.PointName && periodData.FormattedTime == validationResult.FormattedTime)
+                                            {
+                                                periodData.CanAdjustment = true;
+                                            }
+                                        }
+                                    }
                                     // 仅修正允许修正的区域
                                     var pointResult = CorrectPoint(point);
                                     result.AddPointResult(pointResult);
@@ -369,10 +379,10 @@ namespace DataFixter.Services
                 {
                     var originalPeriodValue = currentPeriodValues[i];
                     var originalCumulative = actualCumulatives[i];
-                    
+
                     // 优先修正本期变化量：计算需要调整的本期变化量来使累计值一致
                     var requiredPeriodValue = actualCumulatives[i] - expectedCumulatives[i - 1];
-                    
+
                     // 检查调整后的本期变化量是否在合理范围内
                     if (FloatingPointUtils.IsLessThanOrEqual(FloatingPointUtils.SafeAbs(requiredPeriodValue), _options.MaxCurrentPeriodValue, _options.CumulativeTolerance))
                     {
@@ -381,7 +391,7 @@ namespace DataFixter.Services
                         {
                             requiredPeriodValue = 0.01 * Math.Sign(requiredPeriodValue);
                         }
-                        
+
                         var correction = new DataCorrection
                         {
                             PeriodData = current,
@@ -1387,13 +1397,13 @@ namespace DataFixter.Services
         private double GenerateSmallRandomValue(Random random, double maxAbsValue)
         {
             var value = (random.NextDouble() - 0.5) * 2 * maxAbsValue;
-            
+
             // 确保生成的值不会过小，本期变化量最小值为正负0.01
             if (FloatingPointUtils.IsLessThan(FloatingPointUtils.SafeAbs(value), 0.01, 0.001))
             {
                 value = 0.01 * Math.Sign(value);
             }
-            
+
             return FloatingPointUtils.SafeRound(value, 6);
         }
 

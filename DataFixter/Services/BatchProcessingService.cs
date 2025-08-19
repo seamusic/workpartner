@@ -94,10 +94,10 @@ namespace DataFixter.Services
             string processedDirectory, string comparisonDirectory)
         {
             _logger.ShowStep("步骤1: 读取Excel文件...");
-            
+
             var excelReader = new ExcelBatchReader(processedDirectory, Log.ForContext<ExcelBatchReader>());
             var processedResults = excelReader.ReadAllFiles();
-            
+
             var comparisonReader = new ExcelBatchReader(comparisonDirectory, Log.ForContext<ExcelBatchReader>());
             var comparisonResults = comparisonReader.ReadAllFiles();
 
@@ -113,7 +113,7 @@ namespace DataFixter.Services
             List<ExcelReadResult> processedResults, List<ExcelReadResult> comparisonResults)
         {
             _logger.ShowStep("步骤2: 数据标准化...");
-            
+
             var normalizer = new DataNormalizer(Log.ForContext<DataNormalizer>());
             var normalizedData = normalizer.NormalizeData(processedResults);
             var normalizedComparisonData = normalizer.NormalizeData(comparisonResults);
@@ -132,66 +132,66 @@ namespace DataFixter.Services
         private void MergeComparisonData(List<PeriodData> normalizedData, List<PeriodData> normalizedComparisonData)
         {
             _logger.ShowStep("步骤2.5: 合并对比数据到待处理数据...");
-            
+
             var mergeCount = 0;
             var totalComparisonData = normalizedComparisonData.Count;
-            
+
             // 创建对比数据的查找字典，以FormattedTime和PointName为键
             var comparisonDataLookup = normalizedComparisonData
                 .Where(cd => !string.IsNullOrEmpty(cd.PointName))
                 .ToLookup(cd => (cd.FormattedTime, cd.PointName));
-            
+
             foreach (var data in normalizedData)
             {
                 if (string.IsNullOrEmpty(data.PointName))
                     continue;
-                
+
                 var key = (data.FormattedTime, data.PointName);
                 var matchingComparisonData = comparisonDataLookup[key].ToList();
-                
+
                 if (matchingComparisonData.Any())
                 {
                     var comparisonData = matchingComparisonData.First();
                     var hasChanges = false;
-                    
+
                     // 检查并覆盖本期变化量（仅当对比数据不为空时）
                     if (IsValidValue(comparisonData.CurrentPeriodX))
                     {
                         data.CurrentPeriodX = comparisonData.CurrentPeriodX;
                         hasChanges = true;
                     }
-                    
+
                     if (IsValidValue(comparisonData.CurrentPeriodY))
                     {
                         data.CurrentPeriodY = comparisonData.CurrentPeriodY;
                         hasChanges = true;
                     }
-                    
+
                     if (IsValidValue(comparisonData.CurrentPeriodZ))
                     {
                         data.CurrentPeriodZ = comparisonData.CurrentPeriodZ;
                         hasChanges = true;
                     }
-                    
+
                     // 检查并覆盖累计变化量（仅当对比数据不为空时）
                     if (IsValidValue(comparisonData.CumulativeX))
                     {
                         data.CumulativeX = comparisonData.CumulativeX;
                         hasChanges = true;
                     }
-                    
+
                     if (IsValidValue(comparisonData.CumulativeY))
                     {
                         data.CumulativeY = comparisonData.CumulativeY;
                         hasChanges = true;
                     }
-                    
+
                     if (IsValidValue(comparisonData.CumulativeZ))
                     {
                         data.CumulativeZ = comparisonData.CumulativeZ;
                         hasChanges = true;
                     }
-                    
+
                     if (hasChanges)
                     {
                         mergeCount++;
@@ -199,10 +199,10 @@ namespace DataFixter.Services
                     }
                 }
             }
-            
+
             _logger.ShowComplete($"数据合并完成: 成功合并 {mergeCount} 条记录，对比数据总数 {totalComparisonData} 条");
         }
-        
+
         /// <summary>
         /// 检查数值是否有效（不为空且不为默认值）
         /// </summary>
@@ -220,7 +220,7 @@ namespace DataFixter.Services
         private List<MonitoringPoint> GroupAndSortData(List<PeriodData> normalizedData)
         {
             _logger.ShowStep("步骤3: 数据分组和排序...");
-            
+
             var groupingService = new DataGroupingService(Log.ForContext<DataGroupingService>());
             var monitoringPoints = groupingService.GroupByPointName(normalizedData);
             groupingService.SortAllPointsByTime(monitoringPoints);
@@ -236,15 +236,18 @@ namespace DataFixter.Services
         private List<ValidationResult> ValidateData(List<MonitoringPoint> monitoringPoints, List<PeriodData> normalizedComparisonData)
         {
             _logger.ShowStep("步骤4: 数据验证...");
-            
+
             // 创建配置服务并获取验证选项
             var configService = new ConfigurationService(Log.ForContext<ConfigurationService>());
             var validationOptions = configService.GetValidationOptions();
-            
+
             var validationService = new DataValidationService(Log.ForContext<DataValidationService>(), validationOptions);
-            
+
             // 添加超时保护和进度监控
             var validationResults = ValidateDataWithTimeout(validationService, monitoringPoints, normalizedComparisonData);
+
+            // 将验证结果与监测点关联起来，为步骤5.5的精确验证做准备
+            AssociateValidationResultsWithMonitoringPoints(monitoringPoints, validationResults);
 
             var validCount = validationResults.Count(v => v.Status == ValidationStatus.Valid);
             var invalidCount = validationResults.Count(v => v.Status == ValidationStatus.Invalid);
@@ -257,35 +260,83 @@ namespace DataFixter.Services
         }
 
         /// <summary>
+        /// 将验证结果与监测点关联起来
+        /// </summary>
+        /// <param name="monitoringPoints">监测点列表</param>
+        /// <param name="validationResults">验证结果列表</param>
+        private void AssociateValidationResultsWithMonitoringPoints(List<MonitoringPoint> monitoringPoints, List<ValidationResult> validationResults)
+        {
+            // 按点名分组验证结果
+            var validationByPoint = validationResults
+                .Where(v => !string.IsNullOrEmpty(v.PointName))
+                .GroupBy(v => v.PointName)
+                .ToDictionary(g => g.Key!, g => g.ToList());
+
+            foreach (var point in monitoringPoints)
+            {
+                if (string.IsNullOrEmpty(point.PointName))
+                    continue;
+
+                if (validationByPoint.TryGetValue(point.PointName, out var pointValidations))
+                {
+                    // 检查该监测点是否有需要修正的验证结果
+                    var hasInvalidAndAdjustable = pointValidations.Any(v =>
+                        v.Status == ValidationStatus.Invalid && v.CanAdjustment);
+
+                    // 检查该监测点是否有验证通过的记录
+                    var hasValid = pointValidations.Any(v => v.Status == ValidationStatus.Valid);
+
+                    // 如果监测点有验证通过的记录，且没有需要修正的验证结果，则标记为不需要验证
+                    if (hasValid && !hasInvalidAndAdjustable)
+                    {
+                        point.ValidationStatus = ValidationStatus.Valid;
+                    }
+                    else if (hasInvalidAndAdjustable)
+                    {
+                        point.ValidationStatus = ValidationStatus.Invalid;
+                    }
+                    else
+                    {
+                        point.ValidationStatus = ValidationStatus.NotValidated;
+                    }
+                }
+                else
+                {
+                    point.ValidationStatus = ValidationStatus.NotValidated;
+                }
+            }
+        }
+
+        /// <summary>
         /// 带超时保护的数据验证
         /// </summary>
         /// <param name="validationService">验证服务</param>
         /// <param name="monitoringPoints">监测点列表</param>
         /// <param name="normalizedComparisonData">对比数据</param>
         /// <returns>验证结果列表</returns>
-        private List<ValidationResult> ValidateDataWithTimeout(DataValidationService validationService, 
+        private List<ValidationResult> ValidateDataWithTimeout(DataValidationService validationService,
             List<MonitoringPoint> monitoringPoints, List<PeriodData> normalizedComparisonData)
         {
             var validationResults = new List<ValidationResult>();
             var totalPoints = monitoringPoints.Count;
             var startTime = DateTime.Now;
-            
+
             // 获取验证选项
             var configService = new ConfigurationService(Log.ForContext<ConfigurationService>());
             var validationOptions = configService.GetValidationOptions();
-            
+
             var maxProcessingTime = TimeSpan.FromMinutes(validationOptions.MaxProcessingTimeMinutes);
             var batchSize = validationOptions.BatchSize;
             var enableMemoryCleanup = validationOptions.EnableMemoryCleanup;
             var memoryCleanupFrequency = validationOptions.MemoryCleanupFrequency;
-            
+
             _logger.ConsoleInfo($"开始验证 {totalPoints} 个监测点，最大处理时间: {maxProcessingTime.TotalMinutes} 分钟，批处理大小: {batchSize}");
-            
+
             try
             {
                 // 分批处理监测点，避免长时间阻塞
                 var processedPoints = 0;
-                
+
                 for (int i = 0; i < totalPoints; i += batchSize)
                 {
                     // 检查是否超时
@@ -294,22 +345,22 @@ namespace DataFixter.Services
                         _logger.ShowWarning($"数据验证超时，已处理 {processedPoints}/{totalPoints} 个监测点");
                         break;
                     }
-                    
+
                     var batchEnd = Math.Min(i + batchSize, totalPoints);
                     var batch = monitoringPoints.Skip(i).Take(batchSize).ToList();
-                    
-                    _logger.ConsoleInfo($"处理批次 {i/batchSize + 1}: 监测点 {i+1} 到 {batchEnd}");
-                    
+
+                    _logger.ConsoleInfo($"处理批次 {i / batchSize + 1}: 监测点 {i + 1} 到 {batchEnd}");
+
                     var batchResults = validationService.ValidateAllPoints(batch, normalizedComparisonData);
                     validationResults.AddRange(batchResults);
-                    
+
                     processedPoints += batch.Count;
                     var elapsed = DateTime.Now - startTime;
                     var estimatedTotal = elapsed.TotalSeconds * totalPoints / processedPoints;
                     var remaining = estimatedTotal - elapsed.TotalSeconds;
-                    
+
                     _logger.ConsoleInfo($"批次完成: {processedPoints}/{totalPoints} 个监测点，已用时: {elapsed:mm\\:ss}，预计剩余: {TimeSpan.FromSeconds(remaining):mm\\:ss}");
-                    
+
                     // 根据配置决定是否执行内存清理
                     if (enableMemoryCleanup && processedPoints % memoryCleanupFrequency == 0)
                     {
@@ -318,7 +369,7 @@ namespace DataFixter.Services
                         _logger.ConsoleInfo("执行内存清理");
                     }
                 }
-                
+
                 var totalElapsed = DateTime.Now - startTime;
                 _logger.ConsoleInfo($"数据验证完成，总用时: {totalElapsed:mm\\:ss}，处理监测点: {processedPoints}/{totalPoints}");
             }
@@ -326,11 +377,11 @@ namespace DataFixter.Services
             {
                 _logger.ShowError($"数据验证过程中发生异常: {ex.Message}");
                 _logger.FileError(ex, "数据验证过程中发生异常");
-                
+
                 // 如果验证失败，返回空的验证结果，避免后续步骤失败
                 return new List<ValidationResult>();
             }
-            
+
             return validationResults;
         }
 
@@ -340,11 +391,11 @@ namespace DataFixter.Services
         private CorrectionResult CorrectData(List<MonitoringPoint> monitoringPoints, List<ValidationResult> validationResults)
         {
             _logger.ShowStep("步骤5: 数据修正...");
-            
+
             // 获取修正选项
             var configService = new ConfigurationService(Log.ForContext<ConfigurationService>());
             var correctionOptions = configService.GetCorrectionOptions();
-            
+
             var correctionService = new DataCorrectionService(Log.ForContext<DataCorrectionService>(), correctionOptions);
             var correctionResult = correctionService.CorrectAllPoints(monitoringPoints, validationResults);
 
@@ -359,17 +410,31 @@ namespace DataFixter.Services
         private List<ValidationResult> ValidateCorrectedData(List<MonitoringPoint> monitoringPoints)
         {
             _logger.ShowStep("步骤5.5: 修正后重新验证数据...");
-            
+
             var configService = new ConfigurationService(Log.ForContext<ConfigurationService>());
             var correctionOptions = configService.GetCorrectionOptions();
             var correctionService = new DataCorrectionService(Log.ForContext<DataCorrectionService>(), correctionOptions);
-            
-            var correctedValidationResults = correctionService.ValidateCorrectedMonitoringPoints(monitoringPoints);
-            
+
+            // 只验证那些在步骤4中被标记为无效且需要修正的监测点
+            var pointsToValidate = monitoringPoints.Where(p =>
+                p.ValidationStatus == ValidationStatus.Invalid
+            ).ToList();
+
+            if (!pointsToValidate.Any())
+            {
+                _logger.ShowComplete("修正后验证: 没有需要验证的监测点");
+                return new List<ValidationResult>();
+            }
+
+            var skippedPoints = monitoringPoints.Count - pointsToValidate.Count;
+            _logger.ConsoleInfo($"修正后验证: 只验证 {pointsToValidate.Count} 个需要修正的监测点，跳过 {skippedPoints} 个已通过或无需验证的监测点");
+
+            var correctedValidationResults = correctionService.ValidateCorrectedMonitoringPoints(pointsToValidate);
+
             var correctedValidCount = correctedValidationResults.Count(v => v.Status == ValidationStatus.Valid);
             var correctedInvalidCount = correctedValidationResults.Count(v => v.Status == ValidationStatus.Invalid);
-            
-            _logger.ShowComplete($"修正后验证: 通过 {correctedValidCount} 条, 失败 {correctedInvalidCount} 条");
+
+            _logger.ShowComplete($"修正后验证: 通过 {correctedValidCount} 条, 失败 {correctedInvalidCount} 条 (仅验证需要修正的监测点)");
 
             return correctedValidationResults;
         }
@@ -394,10 +459,10 @@ namespace DataFixter.Services
                     if (Math.Abs(periodData.CurrentPeriodX) > currentPeriodLimit)
                     {
                         var result = CreateLimitValidationResult(
-                            point, periodData, DataDirection.X, 
-                            "本期变化量超限", 
-                            periodData.CurrentPeriodX, 
-                            currentPeriodLimit, 
+                            point, periodData, DataDirection.X,
+                            "本期变化量超限",
+                            periodData.CurrentPeriodX,
+                            currentPeriodLimit,
                             $"X方向本期变化量 {periodData.CurrentPeriodX:F3} 超过限制 {currentPeriodLimit}");
                         validationResults.Add(result);
                     }
@@ -405,10 +470,10 @@ namespace DataFixter.Services
                     if (Math.Abs(periodData.CurrentPeriodY) > currentPeriodLimit)
                     {
                         var result = CreateLimitValidationResult(
-                            point, periodData, DataDirection.Y, 
-                            "本期变化量超限", 
-                            periodData.CurrentPeriodY, 
-                            currentPeriodLimit, 
+                            point, periodData, DataDirection.Y,
+                            "本期变化量超限",
+                            periodData.CurrentPeriodY,
+                            currentPeriodLimit,
                             $"Y方向本期变化量 {periodData.CurrentPeriodY:F3} 超过限制 {currentPeriodLimit}");
                         validationResults.Add(result);
                     }
@@ -416,10 +481,10 @@ namespace DataFixter.Services
                     if (Math.Abs(periodData.CurrentPeriodZ) > currentPeriodLimit)
                     {
                         var result = CreateLimitValidationResult(
-                            point, periodData, DataDirection.Z, 
-                            "本期变化量超限", 
-                            periodData.CurrentPeriodZ, 
-                            currentPeriodLimit, 
+                            point, periodData, DataDirection.Z,
+                            "本期变化量超限",
+                            periodData.CurrentPeriodZ,
+                            currentPeriodLimit,
                             $"Z方向本期变化量 {periodData.CurrentPeriodZ:F3} 超过限制 {currentPeriodLimit}");
                         validationResults.Add(result);
                     }
@@ -428,10 +493,10 @@ namespace DataFixter.Services
                     if (Math.Abs(periodData.CumulativeX) > cumulativeLimit)
                     {
                         var result = CreateLimitValidationResult(
-                            point, periodData, DataDirection.X, 
-                            "累计变化量超限", 
-                            periodData.CumulativeX, 
-                            cumulativeLimit, 
+                            point, periodData, DataDirection.X,
+                            "累计变化量超限",
+                            periodData.CumulativeX,
+                            cumulativeLimit,
                             $"X方向累计变化量 {periodData.CumulativeX:F3} 超过限制 {cumulativeLimit}");
                         validationResults.Add(result);
                     }
@@ -439,10 +504,10 @@ namespace DataFixter.Services
                     if (Math.Abs(periodData.CumulativeY) > cumulativeLimit)
                     {
                         var result = CreateLimitValidationResult(
-                            point, periodData, DataDirection.Y, 
-                            "累计变化量超限", 
-                            periodData.CumulativeY, 
-                            cumulativeLimit, 
+                            point, periodData, DataDirection.Y,
+                            "累计变化量超限",
+                            periodData.CumulativeY,
+                            cumulativeLimit,
                             $"Y方向累计变化量 {periodData.CumulativeY:F3} 超过限制 {cumulativeLimit}");
                         validationResults.Add(result);
                     }
@@ -450,10 +515,10 @@ namespace DataFixter.Services
                     if (Math.Abs(periodData.CumulativeZ) > cumulativeLimit)
                     {
                         var result = CreateLimitValidationResult(
-                            point, periodData, DataDirection.Z, 
-                            "累计变化量超限", 
-                            periodData.CumulativeZ, 
-                            cumulativeLimit, 
+                            point, periodData, DataDirection.Z,
+                            "累计变化量超限",
+                            periodData.CumulativeZ,
+                            cumulativeLimit,
                             $"Z方向累计变化量 {periodData.CumulativeZ:F3} 超过限制 {cumulativeLimit}");
                         validationResults.Add(result);
                     }
@@ -480,12 +545,12 @@ namespace DataFixter.Services
         /// <param name="errorMessage">错误消息</param>
         /// <returns>验证结果</returns>
         private ValidationResult CreateLimitValidationResult(
-            MonitoringPoint point, 
-            PeriodData periodData, 
-            DataDirection direction, 
-            string validationType, 
-            double actualValue, 
-            double limitValue, 
+            MonitoringPoint point,
+            PeriodData periodData,
+            DataDirection direction,
+            string validationType,
+            double actualValue,
+            double limitValue,
             string errorMessage)
         {
             return new ValidationResult
@@ -518,17 +583,17 @@ namespace DataFixter.Services
         /// 步骤6: 生成输出文件
         /// </summary>
         private (OutputResult outputResult, ReportResult reportResult) GenerateOutputFiles(
-            List<MonitoringPoint> monitoringPoints, List<ValidationResult> validationResults, 
+            List<MonitoringPoint> monitoringPoints, List<ValidationResult> validationResults,
             CorrectionResult correctionResult, string processedDirectory)
         {
             _logger.ShowStep("步骤6: 生成输出文件...");
-            
+
             var outputDirectory = Path.Combine(processedDirectory, "修正后");
-            
+
             // 获取输出选项
             var configService = new ConfigurationService(Log.ForContext<ConfigurationService>());
             var outputOptions = configService.GetOutputOptions();
-            
+
             var outputService = new ExcelOutputService(Log.ForContext<ExcelOutputService>(), outputOptions);
 
             var outputResult = outputService.GenerateCorrectedExcelFiles(monitoringPoints, outputDirectory, processedDirectory);
@@ -542,39 +607,39 @@ namespace DataFixter.Services
         /// <summary>
         /// 步骤7: 生成数据对比报告
         /// </summary>
-        private void GenerateDataComparisonReport(List<ExcelReadResult> processedResults, 
+        private void GenerateDataComparisonReport(List<ExcelReadResult> processedResults,
             List<ExcelReadResult> comparisonResults, CorrectionResult correctionResult, string processedDirectory)
         {
             _logger.ShowStep("步骤7: 生成数据对比报告...");
-            
+
             try
             {
                 // 统计processedResults中的数据行数
                 var processedDataRowCount = processedResults.Sum(r => r.DataRows.Count);
                 var processedFileCount = processedResults.Count;
-                
+
                 // 统计comparisonResults中的数据行数
                 var comparisonDataRowCount = comparisonResults.Sum(r => r.DataRows.Count);
                 var comparisonFileCount = comparisonResults.Count;
-                
+
                 // 计算数据增加情况
                 var dataIncreaseCount = processedDataRowCount - comparisonDataRowCount;
                 var dataIncreaseRatio = comparisonDataRowCount > 0 ? (double)dataIncreaseCount / comparisonDataRowCount * 100 : 0;
-                
+
                 // 统计修正的数据量
-                var correctedDataCount = correctionResult.AdjustmentRecords.Count;
+                var correctedDataCount = correctionResult.AdjustmentRecords.Count();
                 var correctedDataRatio = processedDataRowCount > 0 ? (double)correctedDataCount / processedDataRowCount * 100 : 0;
-                
+
                 // 按修正类型统计
                 var correctionTypeStats = correctionResult.AdjustmentRecords
                     .GroupBy(r => r.AdjustmentType)
                     .ToDictionary(g => g.Key.ToString(), g => g.Count());
-                
+
                 // 按数据方向统计
                 var directionStats = correctionResult.AdjustmentRecords
                     .GroupBy(r => r.DataDirection)
                     .ToDictionary(g => g.Key.ToString(), g => g.Count());
-                
+
                 // 生成报告内容
                 var reportContent = new List<string>
                 {
@@ -601,23 +666,23 @@ namespace DataFixter.Services
                     "",
                     "4. 按修正类型统计",
                 };
-                
+
                 foreach (var stat in correctionTypeStats)
                 {
                     reportContent.Add($"   {stat.Key}: {stat.Value} 条");
                 }
-                
+
                 reportContent.Add("");
                 reportContent.Add("5. 按数据方向统计");
                 foreach (var stat in directionStats)
                 {
                     reportContent.Add($"   {stat.Key}: {stat.Value} 条");
                 }
-                
+
                 reportContent.Add("");
                 reportContent.Add("6. 详细修正记录");
                 reportContent.Add(new string('-', 60));
-                
+
                 foreach (var record in correctionResult.AdjustmentRecords)
                 {
                     reportContent.Add($"文件名: {record.FileName ?? "未知"}");
@@ -631,16 +696,16 @@ namespace DataFixter.Services
                     reportContent.Add($"修正原因: {record.Reason ?? "未指定"}");
                     reportContent.Add(new string('-', 40));
                 }
-                
+
                 // 保存报告到文件
                 var outputDirectory = Path.Combine(processedDirectory, "修正后");
                 var reportFilePath = Path.Combine(outputDirectory, "数据对比分析报告.txt");
-                
+
                 // 确保目录存在
                 Directory.CreateDirectory(outputDirectory);
-                
+
                 File.WriteAllLines(reportFilePath, reportContent, System.Text.Encoding.UTF8);
-                
+
                 _logger.ShowComplete($"数据对比报告生成完成: {reportFilePath}");
                 _logger.ConsoleInfo($"数据增加统计: {dataIncreaseCount} 行 ({dataIncreaseRatio:F2}%)");
                 _logger.ConsoleInfo($"数据修正统计: {correctedDataCount} 条 ({correctedDataRatio:F2}%)");
@@ -655,7 +720,7 @@ namespace DataFixter.Services
         /// <summary>
         /// 更新处理结果
         /// </summary>
-        private void UpdateProcessingResult(ProcessingResult result, List<ExcelReadResult> processedResults, 
+        private void UpdateProcessingResult(ProcessingResult result, List<ExcelReadResult> processedResults,
             List<ExcelReadResult> comparisonResults, List<MonitoringPoint> monitoringPoints,
             List<ValidationResult> validationResults, CorrectionResult correctionResult,
             OutputResult outputResult, ReportResult reportResult)
