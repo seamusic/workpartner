@@ -469,6 +469,13 @@ namespace DataFixter.Services
                         var maxAllowedCumulative = _options.MaxCumulativeValue * Math.Sign(correctedCumulative);
                         var adjustedPeriodValue = maxAllowedCumulative - expectedCumulatives[i - 1];
 
+                        // 确保本期变化量不为0，最小值为正负0.01
+                        if (FloatingPointUtils.IsLessThan(FloatingPointUtils.SafeAbs(adjustedPeriodValue), 0.01, _options.CumulativeTolerance))
+                        {
+                            // 如果调整后的值过小，使用最小值
+                            adjustedPeriodValue = 0.01 * Math.Sign(adjustedPeriodValue);
+                        }
+
                         // 检查调整后的本期变化量是否合理
                         if (FloatingPointUtils.IsLessThanOrEqual(FloatingPointUtils.SafeAbs(adjustedPeriodValue), _options.MaxCurrentPeriodValue, _options.CumulativeTolerance))
                         {
@@ -622,7 +629,8 @@ namespace DataFixter.Services
                     }
 
                     // 确保生成的值不会过小，但也要避免无限循环
-                    if (FloatingPointUtils.IsGreaterThanOrEqual(FloatingPointUtils.SafeAbs(newPeriodValue), 0.001, _options.CumulativeTolerance))
+                    // 本期变化量最小值为正负0.01，避免为0的情况
+                    if (FloatingPointUtils.IsGreaterThanOrEqual(FloatingPointUtils.SafeAbs(newPeriodValue), 0.01, _options.CumulativeTolerance))
                     {
                         break; // 满足条件，退出循环
                     }
@@ -653,6 +661,15 @@ namespace DataFixter.Services
                     {
                         newPeriodValue = FloatingPointUtils.SafeRound(minAllowedCumulative - currentCumulative, 6);
                         newCumulative = minAllowedCumulative;
+                    }
+
+                    // 重要：重新检查本期变化量是否满足最小值要求
+                    if (FloatingPointUtils.IsLessThan(FloatingPointUtils.SafeAbs(newPeriodValue), 0.01, _options.CumulativeTolerance))
+                    {
+                        // 如果调整后的值过小，使用最小值
+                        newPeriodValue = 0.01 * Math.Sign(newPeriodValue);
+                        // 重新计算累计值
+                        newCumulative = FloatingPointUtils.SafeRound(currentCumulative + newPeriodValue, 6);
                     }
                 }
 
@@ -1399,13 +1416,14 @@ namespace DataFixter.Services
                         newCumulative = maxAllowedCumulative;
                     }
 
-                    // 如果修正后的值仍然不合理，设置为0
-                    if (FloatingPointUtils.IsGreaterThan(FloatingPointUtils.SafeAbs(newPeriodValue), 0.5, _options.CumulativeTolerance))
+                    // 重要：检查本期变化量是否满足最小值要求
+                    if (FloatingPointUtils.IsLessThan(FloatingPointUtils.SafeAbs(newPeriodValue), 0.01, _options.CumulativeTolerance))
                     {
-                        newPeriodValue = 0.0;
+                        // 本期变化量最小值为正负0.01，避免为0的情况
+                        newPeriodValue = 0.01 * Math.Sign(newPeriodValue);
                         newCumulative = previousPeriod != null
-                            ? GetDirectionValue(previousPeriod, direction).cumulativeValue
-                            : 0.0;
+                            ? GetDirectionValue(previousPeriod, direction).cumulativeValue + newPeriodValue
+                            : newPeriodValue;
                     }
 
                     var correction = new DataCorrection
@@ -1439,6 +1457,13 @@ namespace DataFixter.Services
         private double GenerateSmallRandomValue(Random random, double maxAbsValue)
         {
             var value = (random.NextDouble() - 0.5) * 2 * maxAbsValue;
+            
+            // 确保生成的值不会过小，本期变化量最小值为正负0.01
+            if (FloatingPointUtils.IsLessThan(FloatingPointUtils.SafeAbs(value), 0.01, 0.001))
+            {
+                value = 0.01 * Math.Sign(value);
+            }
+            
             return FloatingPointUtils.SafeRound(value, 6);
         }
 
@@ -1584,10 +1609,10 @@ namespace DataFixter.Services
                             }
                         }
 
-                        // 确保生成的值不会过小
-                        if (FloatingPointUtils.IsLessThan(FloatingPointUtils.SafeAbs(newPeriodValue), 0.001, _options.CumulativeTolerance))
+                        // 确保生成的值不会过小，本期变化量最小值为正负0.01
+                        if (FloatingPointUtils.IsLessThan(FloatingPointUtils.SafeAbs(newPeriodValue), 0.01, _options.CumulativeTolerance))
                         {
-                            newPeriodValue = FloatingPointUtils.SafeSign(avgPeriodValue) * 0.001;
+                            newPeriodValue = FloatingPointUtils.SafeSign(avgPeriodValue) * 0.01;
                         }
 
                         // 累计值基于本期变化量累加

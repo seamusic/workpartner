@@ -213,10 +213,9 @@ namespace DataFixter.Excel
                 var normalizedValue = Math.Round(value, _options.ValueDecimalPlaces);
 
                 // 处理过小的值（接近0）
-                if (Math.Abs(normalizedValue) < _options.MinValueThreshold)
-                {
-                    normalizedValue = 0.0;
-                }
+                // 注意：不再将小值设为0，保持原始值以支持后续的数据修正
+                // 如果 Math.Abs(normalizedValue) < _options.MinValueThreshold，保持原值
+                // 这样可以避免在数据加载阶段就丢失小值信息
 
                 return normalizedValue;
             }
@@ -358,7 +357,7 @@ namespace DataFixter.Excel
         /// <summary>
         /// 最小数值阈值
         /// </summary>
-        public double MinValueThreshold { get; set; } = 0.001;
+        public double MinValueThreshold { get; set; } = 0.01;
 
         /// <summary>
         /// 最大数值阈值
