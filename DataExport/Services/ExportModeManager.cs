@@ -291,22 +291,7 @@ namespace DataExport.Services
         public int ExecutionCount { get; set; }
     }
 
-    /// <summary>
-    /// 全局导出设置
-    /// </summary>
-    public class GlobalExportSettings
-    {
-        public string DefaultExportMode { get; set; } = "AllProjects";
-        public bool EnableModeSwitching { get; set; } = true;
-        public string ModeExecutionOrder { get; set; } = "Priority";
-        public int MaxConcurrentModes { get; set; } = 2;
-        public int GlobalRetryCount { get; set; } = 3;
-        public int GlobalRetryInterval { get; set; } = 10000;
-        public bool EnableProgressTracking { get; set; } = true;
-        public bool EnableResultPersistence { get; set; } = true;
-        public string ResultStoragePath { get; set; } = "./export-results";
-        public bool StopOnFirstFailure { get; set; } = false;
-    }
+
 
     /// <summary>
     /// 验证结果

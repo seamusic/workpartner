@@ -547,7 +547,7 @@ namespace DataExport.Services
         /// </summary>
         public async Task<ExportModeResult> ExecuteIncrementalExportAsync(IncrementalExportConfig config, ExportModeConfig modeConfig)
         {
-            _logger.LogInformation($"开始执行增量导出模式，上次导出时间: {config.LastExportTime}");
+            _logger.LogInformation($"开始执行增量导出模式，时间范围: {config.StartDate} 至 {config.EndDate}");
 
             try
             {
@@ -560,16 +560,15 @@ namespace DataExport.Services
                 };
 
                 // 计算增量时间范围
-                var now = DateTime.Now;
-                var startTime = config.LastExportTime;
-                var endTime = now;
+                var startTime = config.StartDate;
+                var endTime = config.EndDate;
 
-                // 检查增量时间范围是否超过最大限制
-                var incrementHours = (endTime - startTime).TotalHours;
-                if (incrementHours > config.MaxIncrementHours)
+                // 检查增量时间范围是否合理
+                var totalDays = (endTime - startTime).TotalDays;
+                if (totalDays > 365)
                 {
-                    startTime = endTime.AddHours(-config.MaxIncrementHours);
-                    _logger.LogWarning($"增量时间范围 {incrementHours:F1} 小时超过最大限制 {config.MaxIncrementHours} 小时，调整为 {startTime} 至 {endTime}");
+                    endTime = startTime.AddDays(365);
+                    _logger.LogWarning($"增量时间范围 {totalDays:F0} 天超过最大限制 365 天，调整为 {startTime:yyyy-MM-dd} 至 {endTime:yyyy-MM-dd}");
                 }
 
                 var timeRange = new TimeRange

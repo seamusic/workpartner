@@ -45,7 +45,7 @@ namespace DataExport.Services
                 {
                     try
                     {
-                        Console.Write("\n请输入命令 (输入 'help' 查看帮助): ");
+                        Console.Write("\n请输入命令 (输入 'help' 查看帮助，或使用数字快捷命令): ");
                         var input = Console.ReadLine()?.Trim();
 
                         if (string.IsNullOrEmpty(input))
@@ -86,14 +86,16 @@ namespace DataExport.Services
         /// </summary>
         private void ShowMainMenu()
         {
-            Console.WriteLine("\n主要功能:");
-            Console.WriteLine("  1. 导出管理 - 执行各种导出模式");
-            Console.WriteLine("  2. 历史记录 - 查看和管理导出历史");
-            Console.WriteLine("  3. 数据质量 - 检查导出数据质量");
-            Console.WriteLine("  4. 文件管理 - 管理导出文件");
-            Console.WriteLine("  5. 系统状态 - 查看系统状态和配置");
-            Console.WriteLine("  6. 帮助信息 - 查看详细帮助");
-            Console.WriteLine("  0. 退出系统");
+            Console.WriteLine("\n=== 主要功能菜单 ===");
+            Console.WriteLine("  1. 导出管理 (export)     - 执行各种导出模式");
+            Console.WriteLine("  2. 历史记录 (history)    - 查看和管理导出历史");
+            Console.WriteLine("  3. 数据质量 (quality)    - 检查导出数据质量");
+            Console.WriteLine("  4. 文件管理 (file)       - 管理导出文件");
+            Console.WriteLine("  5. 系统状态 (status)     - 查看系统状态和配置");
+            Console.WriteLine("  6. 帮助信息 (help)       - 查看详细帮助");
+            Console.WriteLine("  7. 清屏 (clear)          - 清空屏幕");
+            Console.WriteLine("  0. 退出系统 (exit)       - 退出程序");
+            Console.WriteLine("\n提示: 可以直接输入数字快捷命令，或输入完整命令");
         }
 
         /// <summary>
@@ -106,9 +108,53 @@ namespace DataExport.Services
 
             switch (mainCommand)
             {
+                // 数字快捷命令
+                case "1":
+                    await HandleExportCommandsAsync(new[] { "export", "help" });
+                    break;
+
+                case "2":
+                    await HandleHistoryCommandsAsync(new[] { "history", "help" });
+                    break;
+
+                case "3":
+                    await HandleQualityCommandsAsync(new[] { "quality", "help" });
+                    break;
+
+                case "4":
+                    await HandleFileCommandsAsync(new[] { "file", "help" });
+                    break;
+
+                case "5":
+                    await HandleStatusCommandsAsync(new[] { "status", "help" });
+                    break;
+
+                case "6":
+                    ShowHelp();
+                    break;
+
+                case "7":
+                    Console.Clear();
+                    ShowWelcomeMessage();
+                    ShowMainMenu();
+                    break;
+
+                case "0":
+                    _isRunning = false;
+                    Console.WriteLine("感谢使用数据导出工具，再见！");
+                    break;
+
+                // 完整命令
                 case "help":
                 case "h":
-                    ShowHelp();
+                    if (parts.Length > 1)
+                    {
+                        ShowSpecificHelp(parts[1]);
+                    }
+                    else
+                    {
+                        ShowHelp();
+                    }
                     break;
 
                 case "export":
@@ -145,14 +191,13 @@ namespace DataExport.Services
 
                 case "exit":
                 case "quit":
-                case "0":
                     _isRunning = false;
                     Console.WriteLine("感谢使用数据导出工具，再见！");
                     break;
 
                 default:
                     Console.WriteLine($"未知命令: {mainCommand}");
-                    Console.WriteLine("输入 'help' 查看可用命令");
+                    Console.WriteLine("输入 'help' 查看可用命令，或使用数字快捷命令");
                     break;
             }
         }
@@ -369,17 +414,67 @@ namespace DataExport.Services
         private void ShowHelp()
         {
             Console.WriteLine("\n=== 命令帮助 ===");
-            Console.WriteLine("基本命令:");
-            Console.WriteLine("  help, h          - 显示此帮助信息");
-            Console.WriteLine("  clear, cls       - 清屏");
-            Console.WriteLine("  exit, quit, 0    - 退出系统");
+            Console.WriteLine("数字快捷命令:");
+            Console.WriteLine("  1                    - 导出管理");
+            Console.WriteLine("  2                    - 历史记录管理");
+            Console.WriteLine("  3                    - 数据质量管理");
+            Console.WriteLine("  4                    - 文件管理");
+            Console.WriteLine("  5                    - 系统状态");
+            Console.WriteLine("  6                    - 显示此帮助信息");
+            Console.WriteLine("  7                    - 清屏");
+            Console.WriteLine("  0                    - 退出系统");
+            Console.WriteLine("\n完整命令:");
+            Console.WriteLine("  help, h              - 显示此帮助信息");
+            Console.WriteLine("  clear, cls           - 清屏");
+            Console.WriteLine("  exit, quit           - 退出系统");
             Console.WriteLine("\n功能命令:");
-            Console.WriteLine("  export <命令>    - 导出管理");
-            Console.WriteLine("  history <命令>   - 历史记录管理");
-            Console.WriteLine("  quality <命令>   - 数据质量管理");
-            Console.WriteLine("  file <命令>      - 文件管理");
-            Console.WriteLine("  status <命令>    - 系统状态");
+            Console.WriteLine("  export <命令>        - 导出管理");
+            Console.WriteLine("  history <命令>       - 历史记录管理");
+            Console.WriteLine("  quality <命令>       - 数据质量管理");
+            Console.WriteLine("  file <命令>          - 文件管理");
+            Console.WriteLine("  status <命令>        - 系统状态");
             Console.WriteLine("\n输入 'help <功能>' 查看具体功能的详细帮助");
+            Console.WriteLine("示例: help export, help history");
+        }
+
+        /// <summary>
+        /// 显示特定功能的帮助信息
+        /// </summary>
+        private void ShowSpecificHelp(string function)
+        {
+            switch (function.ToLower())
+            {
+                case "export":
+                case "e":
+                    ShowExportHelp();
+                    break;
+
+                case "history":
+                case "hist":
+                    ShowHistoryHelp();
+                    break;
+
+                case "quality":
+                case "q":
+                    ShowQualityHelp();
+                    break;
+
+                case "file":
+                case "f":
+                    ShowFileHelp();
+                    break;
+
+                case "status":
+                case "s":
+                    ShowStatusHelp();
+                    break;
+
+                default:
+                    Console.WriteLine($"未知功能: {function}");
+                    Console.WriteLine("可用的功能: export, history, quality, file, status");
+                    Console.WriteLine("示例: help export, help history");
+                    break;
+            }
         }
 
         /// <summary>
@@ -388,11 +483,22 @@ namespace DataExport.Services
         private void ShowExportHelp()
         {
             Console.WriteLine("\n=== 导出管理帮助 ===");
-            Console.WriteLine("  export list, ls           - 列出所有导出模式");
-            Console.WriteLine("  export run <模式名称>     - 执行指定导出模式");
-            Console.WriteLine("  export default            - 执行默认导出模式");
-            Console.WriteLine("  export all                - 执行所有导出模式");
-            Console.WriteLine("  export validate           - 验证导出模式配置");
+            Console.WriteLine("基本命令:");
+            Console.WriteLine("  export help           - 显示此帮助信息");
+            Console.WriteLine("  export list, ls       - 列出所有导出模式");
+            Console.WriteLine("  export run <模式名称> - 执行指定导出模式");
+            Console.WriteLine("  export default        - 执行默认导出模式");
+            Console.WriteLine("  export all            - 执行所有导出模式");
+            Console.WriteLine("  export validate       - 验证导出模式配置");
+            Console.WriteLine("\n导出模式:");
+            Console.WriteLine("  AllProjects           - 导出所有项目");
+            Console.WriteLine("  SingleProject         - 导出单个项目");
+            Console.WriteLine("  CustomTimeRange       - 自定义时间范围导出");
+            Console.WriteLine("  BatchExport           - 批量导出");
+            Console.WriteLine("  IncrementalExport     - 增量导出");
+            Console.WriteLine("\n示例:");
+            Console.WriteLine("  export list           - 查看所有导出模式");
+            Console.WriteLine("  export run AllProjects - 执行所有项目导出");
         }
 
         /// <summary>
@@ -401,11 +507,17 @@ namespace DataExport.Services
         private void ShowHistoryHelp()
         {
             Console.WriteLine("\n=== 历史记录管理帮助 ===");
-            Console.WriteLine("  history list, ls          - 列出导出历史记录");
-            Console.WriteLine("  history show <ID>         - 显示指定记录详情");
-            Console.WriteLine("  history stats              - 显示统计信息");
-            Console.WriteLine("  history cleanup            - 清理过期记录");
-            Console.WriteLine("  history export             - 导出历史记录到文件");
+            Console.WriteLine("基本命令:");
+            Console.WriteLine("  history help          - 显示此帮助信息");
+            Console.WriteLine("  history list, ls      - 列出导出历史记录");
+            Console.WriteLine("  history show <ID>     - 显示指定记录详情");
+            Console.WriteLine("  history stats          - 显示统计信息");
+            Console.WriteLine("  history cleanup       - 清理过期记录");
+            Console.WriteLine("  history export        - 导出历史记录到文件");
+            Console.WriteLine("\n示例:");
+            Console.WriteLine("  history list          - 查看历史记录列表");
+            Console.WriteLine("  history show abc123   - 查看ID为abc123的记录详情");
+            Console.WriteLine("  history stats         - 查看统计信息");
         }
 
         /// <summary>
@@ -414,8 +526,16 @@ namespace DataExport.Services
         private void ShowQualityHelp()
         {
             Console.WriteLine("\n=== 数据质量管理帮助 ===");
-            Console.WriteLine("  quality check             - 检查数据质量");
-            Console.WriteLine("  quality report             - 生成质量报告");
+            Console.WriteLine("基本命令:");
+            Console.WriteLine("  quality help          - 显示此帮助信息");
+            Console.WriteLine("  quality check         - 检查数据质量");
+            Console.WriteLine("  quality report        - 生成质量报告");
+            Console.WriteLine("\n功能说明:");
+            Console.WriteLine("  check                 - 对导出的文件进行质量检查");
+            Console.WriteLine("  report                - 生成详细的质量检查报告");
+            Console.WriteLine("\n示例:");
+            Console.WriteLine("  quality check         - 执行数据质量检查");
+            Console.WriteLine("  quality report        - 生成质量报告");
         }
 
         /// <summary>
@@ -424,11 +544,24 @@ namespace DataExport.Services
         private void ShowFileHelp()
         {
             Console.WriteLine("\n=== 文件管理帮助 ===");
-            Console.WriteLine("  file info, status         - 显示存储信息");
-            Console.WriteLine("  file organize             - 整理文件");
-            Console.WriteLine("  file cleanup              - 清理过期文件");
-            Console.WriteLine("  file search <条件>        - 搜索文件");
+            Console.WriteLine("基本命令:");
+            Console.WriteLine("  file help             - 显示此帮助信息");
+            Console.WriteLine("  file info, status     - 显示存储信息");
+            Console.WriteLine("  file organize         - 整理文件");
+            Console.WriteLine("  file cleanup          - 清理过期文件");
+            Console.WriteLine("  file search <条件>    - 搜索文件");
             Console.WriteLine("  file archive <名称> <文件> - 归档文件");
+            Console.WriteLine("\n搜索条件格式:");
+            Console.WriteLine("  size>1MB              - 文件大小大于1MB");
+            Console.WriteLine("  size<100MB            - 文件大小小于100MB");
+            Console.WriteLine("  date>2024-01-01       - 修改日期晚于2024-01-01");
+            Console.WriteLine("  date<2024-12-31       - 修改日期早于2024-12-31");
+            Console.WriteLine("  name=test             - 文件名包含test");
+            Console.WriteLine("  ext=xlsx              - 文件扩展名为xlsx");
+            Console.WriteLine("\n示例:");
+            Console.WriteLine("  file info             - 查看存储信息");
+            Console.WriteLine("  file search size>1MB,date>2024-01-01 - 搜索大文件");
+            Console.WriteLine("  file archive backup file1.xlsx file2.xlsx - 归档文件");
         }
 
         /// <summary>
@@ -437,9 +570,19 @@ namespace DataExport.Services
         private void ShowStatusHelp()
         {
             Console.WriteLine("\n=== 系统状态帮助 ===");
-            Console.WriteLine("  status system             - 显示系统状态");
-            Console.WriteLine("  status config             - 显示配置信息");
-            Console.WriteLine("  status storage            - 显示存储状态");
+            Console.WriteLine("基本命令:");
+            Console.WriteLine("  status help           - 显示此帮助信息");
+            Console.WriteLine("  status system         - 显示系统状态");
+            Console.WriteLine("  status config         - 显示配置信息");
+            Console.WriteLine("  status storage        - 显示存储状态");
+            Console.WriteLine("\n功能说明:");
+            Console.WriteLine("  system                - 显示系统基本信息");
+            Console.WriteLine("  config                - 显示当前配置信息");
+            Console.WriteLine("  storage               - 显示存储使用情况");
+            Console.WriteLine("\n示例:");
+            Console.WriteLine("  status system         - 查看系统状态");
+            Console.WriteLine("  status config         - 查看配置信息");
+            Console.WriteLine("  status storage        - 查看存储状态");
         }
 
         #region 导出管理命令实现

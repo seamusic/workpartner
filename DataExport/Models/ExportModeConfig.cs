@@ -129,33 +129,119 @@ namespace DataExport.Models
     public class IncrementalExportConfig
     {
         /// <summary>
-        /// 上次导出的时间
+        /// 增量类型
         /// </summary>
-        [JsonPropertyName("LastExportTime")]
-        public DateTime LastExportTime { get; set; } = DateTime.Now.AddDays(-1);
+        [JsonPropertyName("IncrementalType")]
+        public IncrementalType IncrementalType { get; set; } = IncrementalType.Daily;
 
         /// <summary>
-        /// 增量时间间隔（小时）
+        /// 增量间隔（天）
         /// </summary>
-        [JsonPropertyName("IncrementHours")]
-        public int IncrementHours { get; set; } = 24;
+        [JsonPropertyName("IncrementalInterval")]
+        public int IncrementalInterval { get; set; } = 1;
 
         /// <summary>
-        /// 是否自动更新上次导出时间
+        /// 开始日期
         /// </summary>
-        [JsonPropertyName("AutoUpdateLastExportTime")]
-        public bool AutoUpdateLastExportTime { get; set; } = true;
+        [JsonPropertyName("StartDate")]
+        public DateTime StartDate { get; set; } = DateTime.Today.AddDays(-30);
 
         /// <summary>
-        /// 最大增量时间范围（小时）
+        /// 结束日期
         /// </summary>
-        [JsonPropertyName("MaxIncrementHours")]
-        public int MaxIncrementHours { get; set; } = 168; // 7天
+        [JsonPropertyName("EndDate")]
+        public DateTime EndDate { get; set; } = DateTime.Today;
 
         /// <summary>
-        /// 是否检查数据完整性
+        /// 是否包含今天
         /// </summary>
-        [JsonPropertyName("CheckDataIntegrity")]
-        public bool CheckDataIntegrity { get; set; } = true;
+        [JsonPropertyName("IncludeToday")]
+        public bool IncludeToday { get; set; } = false;
+
+        /// <summary>
+        /// 是否自动跳过已导出的日期
+        /// </summary>
+        [JsonPropertyName("SkipExportedDates")]
+        public bool SkipExportedDates { get; set; } = true;
+
+        /// <summary>
+        /// 导出文件命名模式
+        /// </summary>
+        [JsonPropertyName("FileNamePattern")]
+        public string FileNamePattern { get; set; } = "{ProjectName}_{DataType}_{Date:yyyyMMdd}";
+
+        /// <summary>
+        /// 是否启用增量合并
+        /// </summary>
+        [JsonPropertyName("EnableIncrementalMerge")]
+        public bool EnableIncrementalMerge { get; set; } = true;
+
+        /// <summary>
+        /// 增量合并策略
+        /// </summary>
+        [JsonPropertyName("MergeStrategy")]
+        public IncrementalMergeStrategy MergeStrategy { get; set; } = IncrementalMergeStrategy.Append;
+
+        /// <summary>
+        /// 增量合并文件大小限制（MB）
+        /// </summary>
+        [JsonPropertyName("MergeFileSizeLimit")]
+        public int MergeFileSizeLimit { get; set; } = 100;
+
+        /// <summary>
+        /// 增量合并行数限制
+        /// </summary>
+        [JsonPropertyName("MergeRowLimit")]
+        public int MergeRowLimit { get; set; } = 1000000;
+    }
+
+    /// <summary>
+    /// 导出模式配置列表包装器
+    /// </summary>
+    public class ExportModeConfigList
+    {
+        /// <summary>
+        /// 导出模式配置列表
+        /// </summary>
+        [JsonPropertyName("ExportModes")]
+        public List<ExportModeConfig> ExportModes { get; set; } = new List<ExportModeConfig>();
+    }
+
+    /// <summary>
+    /// 增量类型
+    /// </summary>
+    public enum IncrementalType
+    {
+        /// <summary>
+        /// 按天增量
+        /// </summary>
+        Daily,
+        /// <summary>
+        /// 按周增量
+        /// </summary>
+        Weekly,
+        /// <summary>
+        /// 按月增量
+        /// </summary>
+        Monthly
+    }
+
+    /// <summary>
+    /// 增量合并策略
+    /// </summary>
+    public enum IncrementalMergeStrategy
+    {
+        /// <summary>
+        /// 追加模式
+        /// </summary>
+        Append,
+        /// <summary>
+        /// 覆盖模式
+        /// </summary>
+        Overwrite,
+        /// <summary>
+        /// 智能模式（根据时间戳决定）
+        /// </summary>
+        Smart
     }
 }
