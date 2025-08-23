@@ -101,7 +101,7 @@ namespace DataExport.Services
 
                 var mergeQuality = new MergeQualityInfo
                 {
-                    MergedFilePath = result.MergedFilePath,
+                    FilePath = result.MergedFilePath,
                     ProjectName = result.ProjectName,
                     DataName = result.DataName,
                     SourceFileCount = result.SourceFiles?.Count ?? 0,

@@ -371,7 +371,6 @@ namespace DataExport.Services
                     try
                     {
                         File.Delete(files[i]);
-                        result.DeletedFiles++;
                         result.DeletedCount++;
                     }
                     catch (Exception ex)
