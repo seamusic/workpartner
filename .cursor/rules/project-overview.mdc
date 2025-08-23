@@ -1,0 +1,31 @@
+# WorkPartner 项目概览
+
+## 项目简介
+WorkPartner是一个Excel数据处理工具，主要用于修复监测数据中累计变化量计算错误。项目包含三个主要组件：
+
+### 核心组件
+- **WorkPartner**: 主要的Excel数据处理工具，位于 [WorkPartner/](mdc:WorkPartner/) 目录
+- **DataFixter**: 数据修正工具，用于修复监测数据错误，位于 [DataFixter/](mdc:DataFixter/) 目录  
+- **DataExport**: 数据导出工具，位于 [DataExport/](mdc:DataExport/) 目录
+
+### 主要功能
+1. **Excel数据处理**: 遍历Excel文件，补充缺失数据
+2. **数据修正**: 修复累计变化量计算错误
+3. **数据验证**: 验证处理后的数据完整性
+4. **批量处理**: 支持批量处理多个Excel文件
+
+### 技术架构
+- 使用C# .NET开发
+- 采用Serilog进行日志记录
+- 支持多种处理模式（比较模式、大值检查模式、数据修正模式等）
+- 包含完整的错误处理和异常管理机制
+
+### 项目状态
+项目已完成多个阶段开发，包含完整的测试套件和文档。主要入口点：
+- [WorkPartner/Program.cs](mdc:WorkPartner/Program.cs) - 主程序入口
+- [DataFixter/Program.cs](mdc:DataFixter/Program.cs) - 数据修正工具入口
+- [DataExport/Program.cs](mdc:DataExport/Program.cs) - 数据导出工具入口
+description:
+globs:
+alwaysApply: false
+---

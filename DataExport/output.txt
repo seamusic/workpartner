@@ -1,0 +1,36 @@
+=== 数据导出工具 ===
+程序启动中...
+当前工作目录: E:\workspace\gmdi\tools\WorkPartner\DataExport
+配置文件路径: E:\workspace\gmdi\tools\WorkPartner\DataExport\appsettings.json
+配置文件是否存在: True
+
+正在创建主机...
+主机创建成功
+正在获取服务...
+服务获取成功
+正在检查配置...
+配置检查完成
+info: DataExport.Services.ConfigurationService[0]
+      配置文件已存在: appsettings.json
+info: DataExport.Services.ConfigurationService[0]
+      成功加载导出配置: PRJ20240719112044 - Angle-PPZV
+info: DataExport.Services.ConfigurationService[0]
+      成功加载认证配置: http://localhost:20472
+正在测试连接...
+info: System.Net.Http.HttpClient.Default.LogicalHandler[100]
+      Start processing HTTP request GET http://localhost:20472/
+info: System.Net.Http.HttpClient.Default.ClientHandler[100]
+      Sending HTTP request GET http://localhost:20472/
+info: System.Net.Http.HttpClient.Default.ClientHandler[101]
+      Received HTTP response headers after 116.3835ms - 200
+info: System.Net.Http.HttpClient.Default.LogicalHandler[101]
+      End processing HTTP request after 130.0605ms - 200
+连接测试成功！
+info: DataExport.Services.ConfigurationService[0]
+      成功加载导出配置: PRJ20240719112044 - Angle-PPZV
+项目: 新造-石碴K25+500边坡 (PRJ20240719112044)
+数据类型: 坡体表面倾斜2 (Angle-PPZV)
+时间范围: 2025-07-01 00:00 到 2025-07-31 00:00
+输出路径: ./exports
+
+是否开始导出数据？(y/N): 导出已取消

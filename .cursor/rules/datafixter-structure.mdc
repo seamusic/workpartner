@@ -1,0 +1,38 @@
+# DataFixter 数据修正工具结构
+
+## 项目组织
+DataFixter是一个专门用于修复监测数据错误的工具，位于 [DataFixter/](mdc:DataFixter/) 目录。
+
+### 核心模块
+- **Excel处理**: 位于 [DataFixter/Excel/](mdc:DataFixter/Excel/) 目录
+  - `ExcelProcessor`: Excel文件处理器
+  - `ExcelBatchReader`: 批量Excel读取器
+  - `DataNormalizer`: 数据标准化器
+
+- **服务层**: 位于 [DataFixter/Services/](mdc:DataFixter/Services/) 目录
+  - 包含各种数据处理服务
+
+- **模型层**: 位于 [DataFixter/Models/](mdc:DataFixter/Models/) 目录
+  - `MonitoringPoint`: 监测点模型
+  - `PeriodData`: 周期数据模型
+  - `CorrectionModels`: 修正模型
+  - `ProcessingResult`: 处理结果模型
+
+### 日志系统
+- 使用Serilog进行日志记录
+- 配置位于 [DataFixter/Logging/](mdc:DataFixter/Logging/) 目录
+- 日志文件存储在 [DataFixter/logs/](mdc:DataFixter/logs/) 目录
+
+### 主要功能
+1. **批量处理**: 支持批量处理多个Excel文件
+2. **数据验证**: 验证输入目录和文件
+3. **错误修复**: 修复累计变化量计算错误
+4. **结果报告**: 生成详细的处理结果报告
+
+### 配置
+- 配置文件: [DataFixter/appsettings.json](mdc:DataFixter/appsettings.json)
+- 支持命令行参数指定处理目录和对比目录
+description:
+globs:
+alwaysApply: false
+---

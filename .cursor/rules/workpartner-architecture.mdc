@@ -1,0 +1,40 @@
+# WorkPartner 核心架构
+
+## 主要服务组件
+WorkPartner核心组件位于 [WorkPartner/Services/](mdc:WorkPartner/Services/) 目录，包含：
+
+### 核心服务
+- **ProcessingPipeline**: 主要的数据处理管道，协调整个Excel处理流程
+- **ModeRunner**: 模式运行器，支持多种处理模式（比较、大值检查、数据修正等）
+- **CommandLineParser**: 命令行参数解析器
+- **ExceptionHandler**: 异常处理器，提供错误统计和报告
+
+### 工具类
+位于 [WorkPartner/Utils/](mdc:WorkPartner/Utils/) 目录：
+- **Logger**: 日志管理工具
+- **ExcelProcessor**: Excel文件处理工具
+- **DataValidator**: 数据验证工具
+- **FileUtils**: 文件操作工具
+
+### 模型类
+位于 [WorkPartner/Models/](mdc:WorkPartner/Models/) 目录：
+- **ProcessingOptions**: 处理选项配置
+- **ProcessingResult**: 处理结果模型
+- **WorkPartnerException**: 自定义异常类型
+
+## 处理流程
+1. **初始化**: 配置日志系统和命令行参数
+2. **模式分发**: 根据参数选择相应的处理模式
+3. **数据验证**: 验证输入文件和目录
+4. **批量处理**: 执行Excel文件处理
+5. **结果输出**: 生成处理报告和日志
+
+## 错误处理
+- 使用自定义异常类型 `WorkPartnerException`
+- 完整的异常捕获和日志记录
+- 错误统计报告生成
+- 内存使用监控
+description:
+globs:
+alwaysApply: false
+---

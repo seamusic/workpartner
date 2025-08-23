@@ -1,0 +1,49 @@
+# 测试和开发指南
+
+## 测试结构
+项目包含完整的测试套件，位于以下目录：
+
+### 单元测试
+- **WorkPartner.Tests**: 位于 [Tests/](mdc:Tests/) 目录
+  - 包含单元测试、集成测试和性能测试
+  - 测试运行脚本: [Tests/run_tests.ps1](mdc:Tests/run_tests.ps1)
+
+- **DataFixter.Tests**: 位于 [DataFixter.Tests/](mdc:DataFixter.Tests/) 目录
+  - 专门针对DataFixter组件的测试
+
+### 测试类型
+1. **单元测试**: 测试单个组件和类的功能
+2. **集成测试**: 测试组件间的协作
+3. **性能测试**: 测试数据处理性能
+4. **配置测试**: 测试配置文件的正确性
+
+## 开发流程
+### 项目阶段
+项目已完成多个开发阶段，相关文档位于根目录：
+- [STAGE1_COMPLETION.md](mdc:STAGE1_COMPLETION.md)
+- [STAGE2_COMPLETION.md](mdc:STAGE2_COMPLETION.md)
+- [STAGE3_COMPLETION.md](mdc:STAGE3_COMPLETION.md)
+- [STAGE4_COMPLETION_REPORT.md](mdc:STAGE4_COMPLETION_REPORT.md)
+- [STAGE5_COMPLETION_REPORT.md](mdc:STAGE5_COMPLETION_REPORT.md)
+
+### 开发文档
+- [README.md](mdc:README.md): 项目总体说明
+- [PROJECT_SUMMARY.md](mdc:PROJECT_SUMMARY.md): 项目总结
+- [IMPLEMENTATION_PLAN.md](mdc:IMPLEMENTATION_PLAN.md): 实施计划
+- [DEVELOPMENT_SCHEDULE.md](mdc:DEVELOPMENT_SCHEDULE.md): 开发进度
+
+### 配置和部署
+- [PUBLISH_GUIDE.md](mdc:PUBLISH_GUIDE.md): 发布指南
+- [QUICK_START.md](mdc:QUICK_START.md): 快速开始指南
+- [EXCEL_CONFIGURATION_GUIDE.md](mdc:EXCEL_CONFIGURATION_GUIDE.md): Excel配置指南
+
+## 代码质量
+- 使用C#编码规范
+- 完整的异常处理机制
+- 详细的日志记录
+- 内存使用监控
+- 错误统计和报告
+description:
+globs:
+alwaysApply: false
+---
