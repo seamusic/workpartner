@@ -14,6 +14,7 @@ namespace DataExport.Services
         private readonly ExportHistoryService _historyService;
         private readonly DataQualityService _qualityService;
         private readonly ExportFileManager _fileManager;
+        private readonly CookieValidationService _cookieValidationService;
         private bool _isRunning = true;
 
         public CommandLineInterface(
@@ -21,13 +22,15 @@ namespace DataExport.Services
             ExportModeManager exportModeManager,
             ExportHistoryService historyService,
             DataQualityService qualityService,
-            ExportFileManager fileManager)
+            ExportFileManager fileManager,
+            CookieValidationService cookieValidationService)
         {
             _logger = logger;
             _exportModeManager = exportModeManager;
             _historyService = historyService;
             _qualityService = qualityService;
             _fileManager = fileManager;
+            _cookieValidationService = cookieValidationService;
         }
 
         /// <summary>
@@ -92,8 +95,9 @@ namespace DataExport.Services
             Console.WriteLine("  3. 数据质量 (quality)    - 检查导出数据质量");
             Console.WriteLine("  4. 文件管理 (file)       - 管理导出文件");
             Console.WriteLine("  5. 系统状态 (status)     - 查看系统状态和配置");
-            Console.WriteLine("  6. 帮助信息 (help)       - 查看详细帮助");
-            Console.WriteLine("  7. 清屏 (clear)          - 清空屏幕");
+            Console.WriteLine("  6. Cookie验证 (cookie)   - 验证API Cookie有效性");
+            Console.WriteLine("  7. 帮助信息 (help)       - 查看详细帮助");
+            Console.WriteLine("  8. 清屏 (clear)          - 清空屏幕");
             Console.WriteLine("  0. 退出系统 (exit)       - 退出程序");
             Console.WriteLine("\n提示: 可以直接输入数字快捷命令，或输入完整命令");
         }
@@ -130,10 +134,14 @@ namespace DataExport.Services
                     break;
 
                 case "6":
-                    ShowHelp();
+                    await HandleCookieValidationAsync();
                     break;
 
                 case "7":
+                    ShowHelp();
+                    break;
+
+                case "8":
                     Console.Clear();
                     ShowWelcomeMessage();
                     ShowMainMenu();
@@ -180,6 +188,11 @@ namespace DataExport.Services
                 case "status":
                 case "s":
                     await HandleStatusCommandsAsync(parts);
+                    break;
+
+                case "cookie":
+                case "c":
+                    await HandleCookieValidationAsync();
                     break;
 
                 case "clear":
@@ -420,8 +433,9 @@ namespace DataExport.Services
             Console.WriteLine("  3                    - 数据质量管理");
             Console.WriteLine("  4                    - 文件管理");
             Console.WriteLine("  5                    - 系统状态");
-            Console.WriteLine("  6                    - 显示此帮助信息");
-            Console.WriteLine("  7                    - 清屏");
+            Console.WriteLine("  6                    - Cookie验证");
+            Console.WriteLine("  7                    - 显示此帮助信息");
+            Console.WriteLine("  8                    - 清屏");
             Console.WriteLine("  0                    - 退出系统");
             Console.WriteLine("\n完整命令:");
             Console.WriteLine("  help, h              - 显示此帮助信息");
@@ -433,6 +447,7 @@ namespace DataExport.Services
             Console.WriteLine("  quality <命令>       - 数据质量管理");
             Console.WriteLine("  file <命令>          - 文件管理");
             Console.WriteLine("  status <命令>        - 系统状态");
+            Console.WriteLine("  cookie               - Cookie验证");
             Console.WriteLine("\n输入 'help <功能>' 查看具体功能的详细帮助");
             Console.WriteLine("示例: help export, help history");
         }
@@ -469,9 +484,14 @@ namespace DataExport.Services
                     ShowStatusHelp();
                     break;
 
+                case "cookie":
+                case "c":
+                    ShowCookieHelp();
+                    break;
+
                 default:
                     Console.WriteLine($"未知功能: {function}");
-                    Console.WriteLine("可用的功能: export, history, quality, file, status");
+                    Console.WriteLine("可用的功能: export, history, quality, file, status, cookie");
                     Console.WriteLine("示例: help export, help history");
                     break;
             }
@@ -1068,6 +1088,67 @@ namespace DataExport.Services
             }
             
             return $"{len:0.##} {sizes[order]}";
+        }
+
+        #endregion
+
+        #region Cookie验证命令实现
+
+        /// <summary>
+        /// 处理Cookie验证命令
+        /// </summary>
+        private async Task HandleCookieValidationAsync()
+        {
+            Console.WriteLine("\n=== Cookie验证 ===");
+            Console.WriteLine("开始验证API设置的Cookie有效性...");
+            
+            try
+            {
+                var result = await _cookieValidationService.ValidateCookieAsync();
+                _cookieValidationService.DisplayValidationResult(result);
+                
+                if (result.IsValid)
+                {
+                    Console.WriteLine("\n✓ Cookie验证成功！可以正常使用导出功能。");
+                }
+                else
+                {
+                    Console.WriteLine("\n⚠ Cookie验证失败！请检查以下问题：");
+                    Console.WriteLine("  1. 确认Cookie是否已过期");
+                    Console.WriteLine("  2. 检查appsettings.json中的Cookie配置");
+                    Console.WriteLine("  3. 确认服务器地址是否正确");
+                    Console.WriteLine("  4. 尝试重新登录系统获取新的Cookie");
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Cookie验证过程中发生异常: {ex.Message}");
+                _logger.LogError(ex, "Cookie验证失败");
+            }
+        }
+
+        /// <summary>
+        /// 显示Cookie验证帮助
+        /// </summary>
+        private void ShowCookieHelp()
+        {
+            Console.WriteLine("\n=== Cookie验证帮助 ===");
+            Console.WriteLine("基本命令:");
+            Console.WriteLine("  cookie                - 验证API Cookie有效性");
+            Console.WriteLine("  c                     - 快捷命令");
+            Console.WriteLine("\n功能说明:");
+            Console.WriteLine("  验证配置的Cookie是否有效，包括:");
+            Console.WriteLine("  - Cookie格式检查");
+            Console.WriteLine("  - API连接测试");
+            Console.WriteLine("  - 天气接口测试");
+            Console.WriteLine("  - 认证状态验证");
+            Console.WriteLine("\n验证项目:");
+            Console.WriteLine("  - ASP.NET_SessionId");
+            Console.WriteLine("  - Qianchen_ADMS_V7_Token");
+            Console.WriteLine("  - Qianchen_ADMS_V7_Mark");
+            Console.WriteLine("\n示例:");
+            Console.WriteLine("  cookie                - 执行Cookie验证");
+            Console.WriteLine("  c                     - 快捷方式验证");
         }
 
         #endregion

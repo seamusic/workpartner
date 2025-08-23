@@ -28,27 +28,18 @@ namespace DataExport.Services
 
             try
             {
-                // 构建请求URL
-                var url = $"{_config.ApiSettings.BaseUrl}{_config.ApiSettings.Endpoint}";
+                // 根据DataCode的前半段判断使用哪个导出路径
+                var dataCodePrefix = GetDataCodePrefix(parameters.DataCode);
+                var endpoint = GetEndpointByDataCode(dataCodePrefix);
                 
-                // 构建查询参数
-                var queryParams = new Dictionary<string, string>
-                {
-                    ["projectId"] = parameters.ProjectId,
-                    ["projectCode"] = "", // 暂时留空
-                    ["ProjectName"] = parameters.ProjectName,
-                    ["DataCode"] = parameters.DataCode,
-                    ["DataName"] = parameters.DataName,
-                    ["StartTime"] = parameters.StartTime,
-                    ["EndTime"] = parameters.EndTime,
-                    ["PointCodes"] = parameters.PointCodes,
-                    ["WithDetail"] = parameters.WithDetail.ToString()
-                };
-
-                var queryString = string.Join("&", queryParams.Select(kvp => $"{kvp.Key}={Uri.EscapeDataString(kvp.Value)}"));
-                var fullUrl = $"{url}?{queryString}";
+                // 构建请求URL
+                var url = $"{_config.ApiSettings.BaseUrl}{endpoint}";
+                
+                // 根据端点构建不同的查询参数
+                var fullUrl = BuildUrlWithParameters(url, endpoint, parameters);
 
                 _logger.LogDebug("请求URL: {Url}", fullUrl);
+                _logger.LogInformation("使用导出路径: {Endpoint} (基于DataCode前缀: {DataCodePrefix})", endpoint, dataCodePrefix);
 
                 // 创建HTTP请求
                 var request = new HttpRequestMessage(HttpMethod.Get, fullUrl);
@@ -256,6 +247,80 @@ namespace DataExport.Services
             {
                 _logger.LogError(ex, "连接测试失败");
                 return false;
+            }
+        }
+
+        /// <summary>
+        /// 从DataCode中提取前缀（-之前的部分）
+        /// </summary>
+        private string GetDataCodePrefix(string dataCode)
+        {
+            if (string.IsNullOrEmpty(dataCode))
+                return string.Empty;
+
+            var dashIndex = dataCode.IndexOf('-');
+            return dashIndex > 0 ? dataCode.Substring(0, dashIndex) : dataCode;
+        }
+
+        /// <summary>
+        /// 根据DataCode前缀确定使用的导出端点
+        /// </summary>
+        private string GetEndpointByDataCode(string dataCodePrefix)
+        {
+            // 根据示例分析，Inclinometer使用特殊路径，其他使用默认路径
+            return dataCodePrefix.ToLower() switch
+            {
+                "inclinometer" => "/QC_FoundationPit/Inclinometer/GetExportList",
+                _ => _config.ApiSettings.Endpoint // 使用默认端点
+            };
+        }
+
+        /// <summary>
+        /// 根据端点构建不同的URL参数
+        /// </summary>
+        private string BuildUrlWithParameters(string baseUrl, string endpoint, ExportParameters parameters)
+        {
+            // 根据端点类型构建不同的参数
+            if (endpoint.Contains("/Inclinometer/GetExportList"))
+            {
+                // Inclinometer端点使用直接的查询参数
+                var queryParams = new Dictionary<string, string>
+                {
+                    ["projectId"] = parameters.ProjectId,
+                    ["projectCode"] = "", // 暂时留空
+                    ["ProjectName"] = parameters.ProjectName,
+                    ["DataCode"] = parameters.DataCode,
+                    ["DataName"] = parameters.DataName,
+                    ["StartTime"] = parameters.StartTime,
+                    ["EndTime"] = parameters.EndTime,
+                    ["PointCodes"] = parameters.PointCodes,
+                    ["WithDetail"] = parameters.WithDetail.ToString()
+                };
+
+                var queryString = string.Join("&", queryParams.Select(kvp => $"{kvp.Key}={Uri.EscapeDataString(kvp.Value)}"));
+                return $"{baseUrl}?{queryString}";
+            }
+            else
+            {
+                // 其他端点使用queryJson参数，包含JSON格式的查询条件
+                var queryData = new Dictionary<string, object>
+                {
+                    ["projectId"] = parameters.ProjectId,
+                    ["projectCode"] = "", // 暂时留空
+                    ["ProjectName"] = parameters.ProjectName,
+                    ["DataCode"] = parameters.DataCode,
+                    ["DataName"] = parameters.DataName,
+                    ["StartTime"] = parameters.StartTime,
+                    ["EndTime"] = parameters.EndTime,
+                    ["PointCodes"] = parameters.PointCodes,
+                    ["WithDetail"] = parameters.WithDetail
+                };
+
+                // 将字典转换为JSON字符串
+                var jsonString = System.Text.Json.JsonSerializer.Serialize(queryData);
+                
+                // 构建queryJson参数
+                return $"{baseUrl}?queryJson={Uri.EscapeDataString(jsonString)}";
             }
         }
     }

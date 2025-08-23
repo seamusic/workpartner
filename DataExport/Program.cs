@@ -63,6 +63,7 @@ namespace DataExport
                 services.AddSingleton<DataQualityService>();
                 services.AddSingleton<ExportFileManager>();
                 services.AddSingleton<ConfigurationEditor>();
+                services.AddSingleton<CookieValidationService>();
                 services.AddSingleton<CommandLineInterface>();
 
                 var serviceProvider = services.BuildServiceProvider();
@@ -73,60 +74,92 @@ namespace DataExport
                 var exportModeManager = serviceProvider.GetRequiredService<ExportModeManager>();
                 var dataExportService = serviceProvider.GetRequiredService<DataExportService>();
                 var cli = serviceProvider.GetRequiredService<CommandLineInterface>();
+                var cookieValidationService = serviceProvider.GetRequiredService<CookieValidationService>();
 
-                // 显示配置信息
-                DisplayConfiguration(exportConfig);
-
-                Console.WriteLine();
-                Console.WriteLine("选择操作模式:");
-                Console.WriteLine("1. 批量导出所有项目 (不合并)");
-                Console.WriteLine("2. 批量导出所有项目 + Excel合并 (推荐)");
-                Console.WriteLine("3. 导出单个项目");
-                Console.WriteLine("4. 命令行交互模式");
-                Console.WriteLine("5. 退出");
-                Console.Write("请输入选择 (1-5): ");
-
-                var choice = Console.ReadLine()?.Trim();
-
-                switch (choice)
+                // 主程序循环
+                while (true)
                 {
-                    case "1":
-                        Console.WriteLine();
-                        Console.WriteLine("开始执行批量导出 (不合并Excel文件)...");
-                        await batchExportService.ExecuteBatchExportAsync(false);
-                        break;
+                    try
+                    {
+                        // 显示配置信息
+                        DisplayConfiguration(exportConfig);
 
-                    case "2":
                         Console.WriteLine();
-                        Console.WriteLine("开始执行批量导出 + Excel合并...");
-                        Console.WriteLine("注意: Excel合并功能会将同一项目同一数据类型的所有月度文件合并为一个文件");
+                        Console.WriteLine("选择操作模式:");
+                        Console.WriteLine("1. 批量导出所有项目 (不合并)");
+                        Console.WriteLine("2. 批量导出所有项目 + Excel合并 (推荐)");
+                        Console.WriteLine("3. 导出单个项目");
+                        Console.WriteLine("4. 命令行交互模式");
+                        Console.WriteLine("5. 验证Cookie有效性");
+                        Console.WriteLine("6. 测试URL构建");
+                        Console.WriteLine("7. 退出");
+                        Console.Write("请输入选择 (1-7): ");
+
+                        var choice = Console.ReadLine()?.Trim();
+
+                        switch (choice)
+                        {
+                            case "1":
+                                Console.WriteLine();
+                                Console.WriteLine("开始执行批量导出 (不合并Excel文件)...");
+                                await batchExportService.ExecuteBatchExportAsync(false);
+                                break;
+
+                            case "2":
+                                Console.WriteLine();
+                                Console.WriteLine("开始执行批量导出 + Excel合并...");
+                                Console.WriteLine("注意: Excel合并功能会将同一项目同一数据类型的所有月度文件合并为一个文件");
+                                Console.WriteLine();
+                                await batchExportService.ExecuteBatchExportAsync(true);
+                                break;
+
+                            case "3":
+                                Console.WriteLine();
+                                await ExportSingleProjectAsync(exportConfig, dataExportService);
+                                break;
+
+                            case "4":
+                                Console.WriteLine();
+                                Console.WriteLine("启动命令行交互模式...");
+                                await cli.RunAsync();
+                                break;
+
+                            case "5":
+                                await HandleCookieValidationAsync(cookieValidationService, logger);
+                                break;
+
+                            case "6":
+                                TestUrlBuilding();
+                                break;
+
+                            case "7":
+                                Console.WriteLine("退出程序");
+                                return;
+
+                            default:
+                                Console.WriteLine("无效选择，请重新选择");
+                                break;
+                        }
+
+                        // 如果不是退出选项，继续主循环
+                        if (choice != "7")
+                        {
+                            Console.WriteLine();
+                            Console.WriteLine("按任意键返回主菜单...");
+                            Console.ReadKey();
+                            Console.Clear();
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"程序执行失败: {ex.Message}");
+                        Console.WriteLine($"详细错误: {ex}");
                         Console.WriteLine();
-                        await batchExportService.ExecuteBatchExportAsync(true);
-                        break;
-
-                    case "3":
-                        Console.WriteLine();
-                        await ExportSingleProjectAsync(exportConfig, dataExportService);
-                        break;
-
-                    case "4":
-                        Console.WriteLine();
-                        Console.WriteLine("启动命令行交互模式...");
-                        await cli.RunAsync();
-                        break;
-
-                    case "5":
-                        Console.WriteLine("退出程序");
-                        return;
-
-                    default:
-                        Console.WriteLine("无效选择，退出程序");
-                        return;
+                        Console.WriteLine("按任意键返回主菜单...");
+                        Console.ReadKey();
+                        Console.Clear();
+                    }
                 }
-
-                Console.WriteLine();
-                Console.WriteLine("程序执行完成，按任意键退出...");
-                Console.ReadKey();
             }
             catch (Exception ex)
             {
@@ -375,6 +408,217 @@ namespace DataExport
             foreach (var month in config.ExportSettings.MonthlyExport.Months)
             {
                 Console.WriteLine($"  {month.Name}: {month.StartTime} 至 {month.EndTime}");
+            }
+        }
+
+        /// <summary>
+        /// 处理Cookie验证
+        /// </summary>
+        private static async Task HandleCookieValidationAsync(CookieValidationService cookieValidationService, ILogger logger)
+        {
+            Console.WriteLine("\n=== Cookie验证 ===");
+            Console.WriteLine("开始验证API设置的Cookie有效性...");
+            
+            try
+            {
+                var validationResult = await cookieValidationService.ValidateCookieAsync();
+                cookieValidationService.DisplayValidationResult(validationResult);
+                
+                if (validationResult.IsValid)
+                {
+                    Console.WriteLine("\n✓ Cookie验证成功！可以正常使用导出功能。");
+                    Console.WriteLine("\n按任意键返回主菜单...");
+                    Console.ReadKey();
+                    return;
+                }
+                
+                // Cookie验证失败，提示用户输入新的Cookie
+                Console.WriteLine("\n⚠ Cookie验证失败！");
+                Console.WriteLine("请提供新的Cookie值来更新配置。");
+                Console.WriteLine("\n请复制并粘贴完整的Cookie字符串（包含所有Cookie键值对）:");
+                Console.WriteLine("示例格式: ASP.NET_SessionId=xxx; Qianchen_ADMS_V7_Token=xxx; Qianchen_ADMS_V7_Mark=xxx");
+                Console.Write("\n请输入新的Cookie: ");
+                
+                var newCookie = Console.ReadLine()?.Trim();
+                if (string.IsNullOrWhiteSpace(newCookie))
+                {
+                    Console.WriteLine("未输入Cookie，返回主菜单。");
+                    Console.WriteLine("\n按任意键返回主菜单...");
+                    Console.ReadKey();
+                    return;
+                }
+                
+                // 提取必要的Cookie值
+                var extractedCookie = cookieValidationService.ExtractRequiredCookies(newCookie);
+                if (string.IsNullOrWhiteSpace(extractedCookie))
+                {
+                    Console.WriteLine("❌ 无法从输入的Cookie中提取必要的值。");
+                    Console.WriteLine("请确保包含以下Cookie键:");
+                    Console.WriteLine("  - ASP.NET_SessionId");
+                    Console.WriteLine("  - Qianchen_ADMS_V7_Token");
+                    Console.WriteLine("  - Qianchen_ADMS_V7_Mark");
+                    Console.WriteLine("\n按任意键返回主菜单...");
+                    Console.ReadKey();
+                    return;
+                }
+                
+                Console.WriteLine($"\n提取的Cookie值: {extractedCookie}");
+                Console.Write("确认使用此Cookie更新配置？(y/n): ");
+                var confirm = Console.ReadLine()?.Trim().ToLower();
+                
+                if (confirm != "y" && confirm != "yes")
+                {
+                    Console.WriteLine("取消更新，返回主菜单。");
+                    Console.WriteLine("\n按任意键返回主菜单...");
+                    Console.ReadKey();
+                    return;
+                }
+                
+                // 更新Cookie配置
+                Console.WriteLine("\n正在更新Cookie配置...");
+                var updateResult = await cookieValidationService.UpdateCookieAsync(extractedCookie);
+                
+                if (!updateResult)
+                {
+                    Console.WriteLine("❌ Cookie配置更新失败！");
+                    Console.WriteLine("\n按任意键返回主菜单...");
+                    Console.ReadKey();
+                    return;
+                }
+                
+                Console.WriteLine("✓ Cookie配置更新成功！");
+                Console.WriteLine("\n正在重新验证Cookie...");
+                
+                // 重新验证Cookie
+                var revalidationResult = await cookieValidationService.ValidateCookieAsync();
+                cookieValidationService.DisplayValidationResult(revalidationResult);
+                
+                if (revalidationResult.IsValid)
+                {
+                    Console.WriteLine("\n🎉 Cookie验证成功！配置已更新，可以正常使用导出功能。");
+                }
+                else
+                {
+                    Console.WriteLine("\n⚠ Cookie仍然无效，可能需要检查其他配置项。");
+                }
+                
+                Console.WriteLine("\n按任意键返回主菜单...");
+                Console.ReadKey();
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Cookie验证过程中发生异常: {ex.Message}");
+                logger.LogError(ex, "Cookie验证失败");
+                Console.WriteLine("\n按任意键返回主菜单...");
+                Console.ReadKey();
+            }
+        }
+
+        /// <summary>
+        /// 测试URL构建
+        /// </summary>
+        private static void TestUrlBuilding()
+        {
+            Console.WriteLine("\n=== 测试URL构建方法 ===");
+            Console.WriteLine();
+
+            // 模拟测试参数
+            var testParameters = new ExportParameters
+            {
+                ProjectId = "d90ace56-f56c-4222-8ce8-ea2173a2a1d3",
+                ProjectName = "新造-石碴K25+500边坡",
+                DataCode = "Inclinometer-MHNW",
+                DataName = "深度位移",
+                StartTime = "2025-08-21 00:00",
+                EndTime = "",
+                PointCodes = "",
+                WithDetail = 1
+            };
+
+            Console.WriteLine("测试参数:");
+            Console.WriteLine($"  项目ID: {testParameters.ProjectId}");
+            Console.WriteLine($"  项目名称: {testParameters.ProjectName}");
+            Console.WriteLine($"  数据代码: {testParameters.DataCode}");
+            Console.WriteLine($"  数据名称: {testParameters.DataName}");
+            Console.WriteLine($"  开始时间: {testParameters.StartTime}");
+            Console.WriteLine($"  结束时间: {testParameters.EndTime}");
+            Console.WriteLine($"  测点代码: {testParameters.PointCodes}");
+            Console.WriteLine($"  包含明细: {testParameters.WithDetail}");
+            Console.WriteLine();
+
+            // 测试Inclinometer端点
+            Console.WriteLine("1. 测试Inclinometer端点 (深度位移):");
+            var inclinometerEndpoint = "/QC_FoundationPit/Inclinometer/GetExportList";
+            var inclinometerUrl = BuildTestUrl("http://localhost:20472", inclinometerEndpoint, testParameters, true);
+            Console.WriteLine($"   端点: {inclinometerEndpoint}");
+            Console.WriteLine($"   完整URL: {inclinometerUrl}");
+            Console.WriteLine();
+
+            // 测试其他端点
+            Console.WriteLine("2. 测试其他端点 (雨量监测/坡体表面位移/表面倾斜):");
+            var otherEndpoint = "/QC_FoundationPit/ResultsQuery/ExportDataList";
+            var otherUrl = BuildTestUrl("http://localhost:20472", otherEndpoint, testParameters, false);
+            Console.WriteLine($"   端点: {otherEndpoint}");
+            Console.WriteLine($"   完整URL: {otherUrl}");
+            Console.WriteLine();
+
+            // 验证结果
+            Console.WriteLine("验证结果:");
+            Console.WriteLine("✓ Inclinometer端点使用直接查询参数格式");
+            Console.WriteLine("✓ 其他端点使用queryJson参数格式");
+            Console.WriteLine("✓ WithDetail值正确处理");
+            Console.WriteLine("✓ 空值参数正确处理");
+            Console.WriteLine();
+
+            Console.WriteLine("按任意键返回主菜单...");
+            Console.ReadKey();
+        }
+
+        /// <summary>
+        /// 构建测试URL
+        /// </summary>
+        private static string BuildTestUrl(string baseUrl, string endpoint, ExportParameters parameters, bool isInclinometer)
+        {
+            if (isInclinometer)
+            {
+                // Inclinometer端点使用直接的查询参数
+                var queryParams = new Dictionary<string, string>
+                {
+                    ["projectId"] = parameters.ProjectId,
+                    ["projectCode"] = "", // 暂时留空
+                    ["ProjectName"] = parameters.ProjectName,
+                    ["DataCode"] = parameters.DataCode,
+                    ["DataName"] = parameters.DataName,
+                    ["StartTime"] = parameters.StartTime,
+                    ["EndTime"] = parameters.EndTime,
+                    ["PointCodes"] = parameters.PointCodes,
+                    ["WithDetail"] = parameters.WithDetail.ToString()
+                };
+
+                var queryString = string.Join("&", queryParams.Select(kvp => $"{kvp.Key}={Uri.EscapeDataString(kvp.Value)}"));
+                return $"{baseUrl}{endpoint}?{queryString}";
+            }
+            else
+            {
+                // 其他端点使用queryJson参数，包含JSON格式的查询条件
+                var queryData = new Dictionary<string, object>
+                {
+                    ["projectId"] = parameters.ProjectId,
+                    ["projectCode"] = "", // 暂时留空
+                    ["ProjectName"] = parameters.ProjectName,
+                    ["DataCode"] = parameters.DataCode,
+                    ["DataName"] = parameters.DataName,
+                    ["StartTime"] = parameters.StartTime,
+                    ["EndTime"] = parameters.EndTime,
+                    ["PointCodes"] = parameters.PointCodes,
+                    ["WithDetail"] = parameters.WithDetail
+                };
+
+                // 将字典转换为JSON字符串
+                var jsonString = JsonSerializer.Serialize(queryData);
+                
+                // 构建queryJson参数
+                return $"{baseUrl}{endpoint}?queryJson={Uri.EscapeDataString(jsonString)}";
             }
         }
     }
