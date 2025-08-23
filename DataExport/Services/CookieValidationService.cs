@@ -128,25 +128,94 @@ namespace DataExport.Services
         {
             try
             {
-                var url = $"{_config.ApiSettings.BaseUrl}/QC_FoundationPit/ResultsQuery/DataList";
+                var url = $"{_config.ApiSettings.BaseUrl}/QC_FoundationPit/HomePage/GetWeather?_={DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()}";
                 var request = new HttpRequestMessage(HttpMethod.Get, url);
                 
                 // 添加必要的请求头
                 request.Headers.Add("User-Agent", _config.ApiSettings.UserAgent);
-                request.Headers.Add("Referer", _config.ApiSettings.Referer);
-                request.Headers.Add("Cookie", _config.ApiSettings.Cookie);
-                request.Headers.Add("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8");
+                request.Headers.Add("Accept", "application/json, text/javascript, */*; q=0.01");
                 request.Headers.Add("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8,en-GB;q=0.7,en-US;q=0.6");
+                request.Headers.Add("Connection", "keep-alive");
+                request.Headers.Add("Cookie", _config.ApiSettings.Cookie);
+                request.Headers.Add("Referer", $"{_config.ApiSettings.BaseUrl}/Home/Index");
+                request.Headers.Add("Sec-Fetch-Dest", "empty");
+                request.Headers.Add("Sec-Fetch-Mode", "cors");
+                request.Headers.Add("Sec-Fetch-Site", "same-origin");
+                request.Headers.Add("X-Requested-With", "XMLHttpRequest");
+                request.Headers.Add("account", "System");
 
                 var response = await _httpClient.SendAsync(request);
                 
                 if (response.IsSuccessStatusCode)
                 {
-                    return new CookieValidationResult
+                    var content = await response.Content.ReadAsStringAsync();
+                    _logger.LogDebug("API连接测试响应: {Content}", content);
+                    
+                    // 尝试解析JSON响应并验证格式
+                    try
                     {
-                        IsValid = true,
-                        Message = "API连接测试成功"
-                    };
+                        var jsonDoc = JsonDocument.Parse(content);
+                        var root = jsonDoc.RootElement;
+                        
+                        // 验证JSON结构是否符合预期格式
+                        if (root.TryGetProperty("code", out var codeElement) && 
+                            root.TryGetProperty("info", out var infoElement) && 
+                            root.TryGetProperty("data", out var dataElement))
+                        {
+                            // 检查code是否为200
+                            if (codeElement.TryGetInt32(out var code) && code == 200)
+                            {
+                                // 检查data结构
+                                if (dataElement.TryGetProperty("date", out var dateElement) &&
+                                    dataElement.TryGetProperty("info", out var infoDataElement) &&
+                                    dataElement.TryGetProperty("warings", out var warningsElement))
+                                {
+                                    return new CookieValidationResult
+                                    {
+                                        IsValid = true,
+                                        Message = "API连接测试成功",
+                                        Details = $"成功获取天气数据，响应格式正确 (code: {code}, info: {infoElement.GetString()})"
+                                    };
+                                }
+                                else
+                                {
+                                    return new CookieValidationResult
+                                    {
+                                        IsValid = false,
+                                        Message = "API响应格式不完整",
+                                        Details = $"响应缺少必要的data字段: {content}"
+                                    };
+                                }
+                            }
+                            else
+                            {
+                                return new CookieValidationResult
+                                {
+                                    IsValid = false,
+                                    Message = "API响应状态异常",
+                                    Details = $"响应code不是200: {code}, 响应内容: {content}"
+                                };
+                            }
+                        }
+                        else
+                        {
+                            return new CookieValidationResult
+                            {
+                                IsValid = false,
+                                Message = "API响应格式错误",
+                                Details = $"响应缺少必要的字段(code/info/data): {content}"
+                            };
+                        }
+                    }
+                    catch (JsonException ex)
+                    {
+                        return new CookieValidationResult
+                        {
+                            IsValid = false,
+                            Message = "API响应JSON格式错误",
+                            Details = $"JSON解析失败: {ex.Message}, 响应内容: {content}"
+                        };
+                    }
                 }
                 else if (response.StatusCode == System.Net.HttpStatusCode.Unauthorized)
                 {
@@ -159,11 +228,12 @@ namespace DataExport.Services
                 }
                 else
                 {
+                    var content = await response.Content.ReadAsStringAsync();
                     return new CookieValidationResult
                     {
                         IsValid = false,
                         Message = "API连接异常",
-                        Details = $"HTTP状态码: {response.StatusCode} - {response.ReasonPhrase}"
+                        Details = $"HTTP状态码: {response.StatusCode} - 响应内容: {content}"
                     };
                 }
             }
@@ -217,35 +287,69 @@ namespace DataExport.Services
                     var content = await response.Content.ReadAsStringAsync();
                     _logger.LogDebug("天气API响应: {Content}", content);
                     
-                    // 尝试解析JSON响应
+                    // 尝试解析JSON响应并验证格式
                     try
                     {
                         var jsonDoc = JsonDocument.Parse(content);
-                        return new CookieValidationResult
+                        var root = jsonDoc.RootElement;
+                        
+                        // 验证JSON结构是否符合预期格式
+                        if (root.TryGetProperty("code", out var codeElement) && 
+                            root.TryGetProperty("info", out var infoElement) && 
+                            root.TryGetProperty("data", out var dataElement))
                         {
-                            IsValid = true,
-                            Message = "天气API测试成功",
-                            Details = "成功获取天气数据，Cookie有效"
-                        };
-                    }
-                    catch (JsonException)
-                    {
-                        // 如果不是JSON格式，检查是否包含错误信息
-                        if (content.Contains("error") || content.Contains("Error") || content.Contains("未授权"))
+                            // 检查code是否为200
+                            if (codeElement.TryGetInt32(out var code) && code == 200)
+                            {
+                                // 检查data结构
+                                if (dataElement.TryGetProperty("date", out var dateElement) &&
+                                    dataElement.TryGetProperty("info", out var infoDataElement) &&
+                                    dataElement.TryGetProperty("warings", out var warningsElement))
+                                {
+                                    return new CookieValidationResult
+                                    {
+                                        IsValid = true,
+                                        Message = "天气API测试成功",
+                                        Details = $"成功获取天气数据，响应格式正确 (code: {code}, info: {infoElement.GetString()})"
+                                    };
+                                }
+                                else
+                                {
+                                    return new CookieValidationResult
+                                    {
+                                        IsValid = false,
+                                        Message = "天气API响应格式不完整",
+                                        Details = $"响应缺少必要的data字段: {content}"
+                                    };
+                                }
+                            }
+                            else
+                            {
+                                return new CookieValidationResult
+                                {
+                                    IsValid = false,
+                                    Message = "天气API响应状态异常",
+                                    Details = $"响应code不是200: {code}, 响应内容: {content}"
+                                };
+                            }
+                        }
+                        else
                         {
                             return new CookieValidationResult
                             {
                                 IsValid = false,
-                                Message = "天气API返回错误",
-                                Details = $"响应内容: {content}"
+                                Message = "天气API响应格式错误",
+                                Details = $"响应缺少必要的字段(code/info/data): {content}"
                             };
                         }
-                        
+                    }
+                    catch (JsonException ex)
+                    {
                         return new CookieValidationResult
                         {
-                            IsValid = true,
-                            Message = "天气API测试成功",
-                            Details = "成功获取响应数据，Cookie有效"
+                            IsValid = false,
+                            Message = "天气API响应JSON格式错误",
+                            Details = $"JSON解析失败: {ex.Message}, 响应内容: {content}"
                         };
                     }
                 }
